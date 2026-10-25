@@ -1,4 +1,4 @@
-# Phạm vi triển khai phương án B
+# Phạm vi triển khai AgentSOC
 
 ## Hoàn thành trong repo
 

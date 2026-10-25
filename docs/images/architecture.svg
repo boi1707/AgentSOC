@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1140" height="450" viewBox="0 0 760 300" role="img" aria-label="Sơ đồ: lab local nối WireGuard tới VPS, VPS gọi Cloud LLM">
-<title>Kiến trúc AgentSOC — phương án B</title>
+<title>Kiến trúc AgentSOC</title>
 <style>
 text{fill:#15222e;font:12px "DejaVu Sans",Arial,sans-serif}
 .t2{fill:#56677a;font-size:11px}

@@ -1,14 +1,14 @@
 # AgentSOC
 An evidence-driven LLM system for security incident analysis and human-reviewed response.
 
-Backend prototype theo phương án B: Wazuh → gom incident → pseudonymization → ba tác tử
+Backend prototype: Wazuh → gom incident → pseudonymization → ba tác tử
 network/endpoint/judge → SQLite ledger → người duyệt → dry-run hoặc SSH forced command.
 
 ## Kiến trúc
 
 ![Sơ đồ kiến trúc AgentSOC: lab local kết nối WireGuard tới VPS và Cloud LLM](docs/images/architecture.svg)
 
-Sơ đồ thiết kế phương án B, trích từ tài liệu HTML; không biểu thị hạ tầng đã triển khai thực tế.
+Sơ đồ thiết kế AgentSOC, trích từ tài liệu HTML; không biểu thị hạ tầng đã triển khai thực tế.
 
 ## Chạy trên Windows
 
