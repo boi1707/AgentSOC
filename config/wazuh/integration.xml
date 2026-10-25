@@ -1,0 +1,8 @@
+<!-- Merge inside ossec_config on the manager. Replace the key locally. -->
+<integration>
+  <name>custom-agentsoc</name>
+  <hook_url>http://10.8.0.1:8000/ingest</hook_url>
+  <api_key>REPLACE_WITH_INGEST_KEY</api_key>
+  <level>7</level>
+  <alert_format>json</alert_format>
+</integration>

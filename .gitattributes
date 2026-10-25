@@ -1,0 +1,7 @@
+* text=auto
+*.py text eol=lf
+scripts/custom-agentsoc text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+*.nft text eol=lf
+Dockerfile text eol=lf

@@ -1,0 +1,19 @@
+<group name="agentsoc,">
+  <rule id="100010" level="8">
+    <decoded_as>json</decoded_as>
+    <field name="sid" type="pcre2">\d+</field>
+    <description>Snort JSON alert</description>
+  </rule>
+  <rule id="100020" level="10">
+    <if_group>sysmon_event1</if_group>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)powershell.*\s-(e|enc|encodedcommand)\s</field>
+    <description>Encoded PowerShell command</description>
+    <mitre><id>T1059.001</id></mitre>
+  </rule>
+  <rule id="100002" level="15">
+    <if_group>sysmon_event1</if_group>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^mimikatz\.exe$</field>
+    <description>Mimikatz original file name</description>
+    <mitre><id>T1003</id></mitre>
+  </rule>
+</group>

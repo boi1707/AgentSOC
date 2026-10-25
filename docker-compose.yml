@@ -1,13 +1,22 @@
-﻿version: '3.8'
-
 services:
   agentsoc-backend:
     build: .
-    container_name: agentsoc_backend
     ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      - "${BIND_IP:-127.0.0.1}:8000:8000"
+    env_file: .env
     volumes:
-      - ./logs:/app/logs
-    restart: always
+      - ./data:/app/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

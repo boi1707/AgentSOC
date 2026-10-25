@@ -1,0 +1,2 @@
+{"id":"demo-net-1","timestamp":"2026-01-01T00:00:00Z","rule":{"id":"100010","level":8,"description":"Synthetic SMB scan"},"data":{"src_addr":"192.168.20.50","dst_addr":"192.168.10.20","dst_port":445,"proto":"TCP","msg":"Synthetic scan"}}
+{"id":"demo-host-1","timestamp":"2026-01-01T00:00:01Z","rule":{"id":"100020","level":12,"description":"Synthetic encoded PowerShell"},"agent":{"ip":"10.8.0.3","name":"win-victim"},"data":{"win":{"eventdata":{"image":"C:\\Users\\labuser\\powershell.exe","commandLine":"powershell -enc U1lOVEhFVElD","user":"LAB\\labuser"}}}}
