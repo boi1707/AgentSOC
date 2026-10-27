@@ -1,0 +1,17 @@
+{
+  "session_id": "string",
+  "test_id": "string",
+  "scenario": "string",
+  "technique_id": null,
+  "atomic_test_id": null,
+  "host_id": "string",
+  "start_time": null,
+  "end_time": null,
+  "expected_attack": null,
+  "execution_status": "NOT_RUN",
+  "sysmon_evidence": [],
+  "wazuh_evidence": null,
+  "snort_evidence": null,
+  "ground_truth_label": null,
+  "notes": ""
+}

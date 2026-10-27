@@ -1,0 +1,34 @@
+project: AgentSOC
+module: Red-Team-QA
+status: planning
+
+tests:
+  - test_id: RT-001
+    scenario: command_execution
+    technique_id: null
+    atomic_test_id: null
+    status: PLANNED
+
+  - test_id: RT-002
+    scenario: privilege_escalation
+    technique_id: null
+    atomic_test_id: null
+    status: PLANNED
+
+  - test_id: RT-003
+    scenario: c2
+    technique_id: null
+    atomic_test_id: null
+    status: WAIT_DEPENDENCY
+
+  - test_id: RT-004
+    scenario: exfiltration
+    technique_id: null
+    atomic_test_id: null
+    status: WAIT_DEPENDENCY
+
+  - test_id: RT-005
+    scenario: lateral_movement
+    technique_id: null
+    atomic_test_id: null
+    status: WAIT_DEPENDENCY
