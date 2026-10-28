@@ -1,0 +1,12 @@
+{
+  "session_id": "",
+  "test_id": "",
+  "scenario": "",
+  "start_time": null,
+  "end_time": null,
+  "execution_status": "NOT_RUN",
+  "sysmon_evidence": [],
+  "wazuh_evidence": null,
+  "snort_evidence": null,
+  "notes": ""
+}

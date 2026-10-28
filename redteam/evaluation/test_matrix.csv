@@ -1,0 +1,6 @@
+test_id,scenario,atomic,sysmon,wazuh,snort,status
+RT-001,command_execution,READY,READY,WAIT,N/A,PLANNED
+RT-002,privilege_escalation,READY,READY,WAIT,N/A,PLANNED
+RT-003,c2,READY,READY,WAIT,WAIT,WAIT_DEPENDENCY
+RT-004,exfiltration,READY,READY,WAIT,WAIT,WAIT_DEPENDENCY
+RT-005,lateral_movement,READY,READY,WAIT,WAIT,WAIT_DEPENDENCY
