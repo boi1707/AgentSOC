@@ -1,4 +1,4 @@
-# Triển khai VPS và lab (chưa chạy tự động)
+# Triển khai VPS và lab
 
 ## Bố trí
 
@@ -21,6 +21,10 @@ gateway thì chặn nftables sẽ không ngăn được lưu lượng. Đặt IP
 5. Cài Wazuh theo phiên bản chính thức. Repo này không chứa compose Wazuh, cert hay password mặc định.
 6. Clone repo, tạo `.env` từ [mẫu](../.env.example), giữ `dry-run`, tạo volume UID 10001 rồi chạy
    `docker compose up -d --build`. Khởi động WireGuard trước Docker nếu bind 10.8.0.1.
+
+Có thể dùng `bash scripts/setup.sh` nếu host đã có Python 3.12+, venv, Docker Compose,
+`ip` và `ssh-keygen`. Script tạo key/config và chuẩn bị quyền data, không cài Wazuh hay VPN.
+Mẫu WireGuard theo từng máy nằm trong [config/wireguard](../config/wireguard/).
 
 ## Wazuh manager → AgentSOC
 

@@ -1,0 +1,1 @@
+from="10.8.0.1",restrict,command="/usr/local/bin/agentsoc-block" ssh-ed25519 REPLACE_PUBLIC_KEY agentsoc

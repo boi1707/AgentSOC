@@ -7,15 +7,19 @@ import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from src import response
 from src.anon import Anon
-from src.incident import norm
+from src.incident import Grouper, norm
+from src.logs import configure_logging
 from src.service import Service
 from src.settings import Settings
+
+log = logging.getLogger("agentsoc.api")
 
 
 class Alert(BaseModel):
@@ -34,9 +38,23 @@ def create_app(settings=None, *, worker=True):
     @asynccontextmanager
     async def lifespan(app):
         config.validate()
+        configure_logging(config)
         service = Service(config)
         service.store.recover()
         app.state.service = service
+        log.info(
+            "service.started",
+            extra={
+                "details": {
+                    "llm_mode": config.llm_mode,
+                    "response_mode": config.response_mode,
+                    "quiet_seconds": config.quiet,
+                    "gap_seconds": config.gap,
+                    "cap": config.cap,
+                    "hi_level": config.hi_level,
+                }
+            },
+        )
         stop = asyncio.Event()
 
         async def run():
@@ -44,19 +62,33 @@ def create_app(settings=None, *, worker=True):
                 try:
                     await asyncio.to_thread(service.tick)
                 except Exception:
-                    logging.getLogger(__name__).error("Worker cycle failed; persisted queue retained")
+                    log.exception("worker.failed")
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=config.poll)
                 except TimeoutError:
                     pass
 
         task = asyncio.create_task(run()) if worker else None
-        yield
-        stop.set()
-        if task:
-            await task
+        try:
+            yield
+        finally:
+            stop.set()
+            if task:
+                await task
+            log.info("service.stopped")
 
     app = FastAPI(title="AgentSOC", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        from fastapi.responses import JSONResponse
+
+        malformed_json = any(error["type"] == "json_invalid" for error in exc.errors())
+        # Do not echo raw rejected input or credentials back to clients.
+        return JSONResponse(
+            {"detail": "Invalid JSON" if malformed_json else "Invalid request"},
+            status_code=400 if malformed_json else 422,
+        )
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -98,21 +130,57 @@ def create_app(settings=None, *, worker=True):
     def health(request: Request):
         with request.app.state.service.store.connect() as db:
             db.execute("SELECT 1").fetchone()
-        return {"status": "ok", "llm_mode": config.llm_mode, "response_mode": config.response_mode}
+            count = db.execute("SELECT count(*) FROM cases").fetchone()[0]
+            queued = db.execute("SELECT count(*) FROM cases WHERE status='queued'").fetchone()[0]
+            pending_rows = db.execute(
+                "SELECT alert,received FROM inbox WHERE case_id IS NULL ORDER BY received,rowid"
+            ).fetchall()
+            last = db.execute("SELECT max(received) FROM inbox").fetchone()[0]
+        group = Grouper(
+            gap=config.gap, quiet=config.quiet, hi=config.hi_level, cap=config.cap, host_ips=config.host_ips
+        )
+        for row in pending_rows:
+            group.add(json.loads(row["alert"]), row["received"])
+        return {
+            "status": "ok",
+            "llm_mode": config.llm_mode,
+            "response_mode": config.response_mode,
+            "llm_configured": bool(config.llm_url and config.llm_key and config.llm_model),
+            "case_count": count,
+            "pending_incidents": queued + len(group.inc),
+            "unprocessed_alerts": len(pending_rows),
+            "last_alert_at": last,
+        }
+
+    @app.get("/metrics", dependencies=[Depends(reviewer)])
+    def metrics(request: Request):
+        return request.app.state.service.store.metrics()
 
     @app.post("/ingest", dependencies=[Depends(ingestion)], status_code=202)
     def ingest(alert: Alert, request: Request):
         data = alert.model_dump()
         try:
-            _, ips = norm(data, config.host_ips)
+            row, ips = norm(data, config.host_ips)
             level = int(data["rule"].get("level", 0))
-            if not ips or not 0 <= level <= 16:
+            if not ips or not 0 <= level <= 15:
                 raise ValueError()
         except (ValueError, TypeError, AttributeError, KeyError):
             raise HTTPException(422, "Malformed Wazuh alert or missing correlation IP") from None
         if level < 7:
             return {"accepted": False, "reason": "below_level_7"}
         accepted = request.app.state.service.store.ingest(data)
+        log.info(
+            "alert.received",
+            extra={
+                "details": {
+                    "accepted": accepted,
+                    "alert_id": data["id"],
+                    "rule_id": row["rule"],
+                    "rule_level": level,
+                    "kind": row["kind"],
+                }
+            },
+        )
         return {"accepted": accepted, "id": data["id"]}
 
     def public_case(case):
@@ -205,6 +273,8 @@ def create_app(settings=None, *, worker=True):
         case = store.get(cid)
         if not case:
             raise HTTPException(404)
+        if case["status"] != "pending":
+            raise HTTPException(409, "Case is no longer pending")
         ip = None
         if action == "approve":
             try:
@@ -220,6 +290,18 @@ def create_app(settings=None, *, worker=True):
             except (OSError, TimeoutError, subprocess.TimeoutExpired):
                 status = "action_unknown"
         store.record_action(cid, action, ip, config.response_mode, status)
+        log.info(
+            "review.completed",
+            extra={
+                "case_id": cid,
+                "details": {
+                    "action": action,
+                    "mode": config.response_mode,
+                    "status": status,
+                    "reviewer": "reviewer",
+                },
+            },
+        )
         return {"id": cid, "status": status}
 
     return app

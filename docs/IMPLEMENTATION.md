@@ -13,7 +13,10 @@
 - UI review có xác thực, escape HTML, header chống CSRF, approve/reject và claim nguyên tử.
 - Chặn mặc định dry-run; SSH pin host key; gateway chỉ cho phép subnet attacker của lab.
 - Ledger hành động, trạng thái action_unknown nếu crash/timeout không rõ kết quả.
-- Fixture/demo offline, replay API, audit metrics và GitHub Actions.
+- Fixture/demo offline, replay API JSON/JSONL theo tốc độ, đánh giá nhãn alert và GitHub Actions.
+- Log JSON stdout/file, xoay file, lọc secret và stack không chứa exception message.
+- Health/metrics bền vững qua restart, audit lần bị guard chặn với placeholder an toàn.
+- Script setup VPS, mẫu WireGuard/authorized_keys, runtime/dev dependency lock.
 
 ## Khác với code mẫu HTML
 
@@ -32,8 +35,8 @@ Các ngưỡng 80%, latency 10–15s, leakage=0 là mục tiêu cần đo trên 
 5. Telegram thật; SSH forced command, block TTL 1h và kiểm tra trước/sau duyệt.
 6. Bộ dữ liệu gán nhãn, replay cố định và ablation A–D. Raw baseline chỉ xây riêng cho dữ liệu
    lab tổng hợp, không tắt guard của dịch vụ production.
-7. Đánh giá precision/recall trên case/incident ground truth, latency end-to-end và USD theo
-   biểu giá model thực tế. Metrics hiện chỉ xuất token, thời gian mỗi call và consolidation.
+7. Thu thập số đo thật. Công cụ metrics đã tính precision/recall cấp alert từ CSV,
+   latency end-to-end và USD khi có usage/đơn giá; chưa có tập nhãn và kết quả thực nghiệm.
 
 ## Giới hạn prototype
 

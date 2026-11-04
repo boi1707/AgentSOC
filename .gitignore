@@ -222,14 +222,12 @@ __marimo__/
 # Local incident data, credentials and generated evaluation output
 data/
 logs/*
-!logs/.gitkeep
 *.db
 *.db-wal
 *.db-shm
 *.pem
 *.key
 certs/*
-!certs/.gitkeep
 .env.*
 !.env.example
 reports/

@@ -26,6 +26,8 @@ class Store:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+        # Raw evidence and restoration maps are local-only data.
+        Path(path).chmod(0o600)
 
     @contextmanager
     def connect(self):
@@ -105,3 +107,28 @@ class Store:
     def recover(self):
         with self.connect() as db:
             db.execute("UPDATE cases SET status='action_unknown' WHERE status='executing'")
+
+    def metrics(self):
+        with self.connect() as db:
+            alerts, last = db.execute("SELECT count(*),max(received) FROM inbox").fetchone()
+            cases = db.execute("SELECT count(*) FROM cases").fetchone()[0]
+            calls, blocked, errors, call_ms = db.execute(
+                "SELECT count(*),coalesce(sum(error='Blocked'),0),"
+                "coalesce(sum(error IS NOT NULL AND error!='Blocked'),0),"
+                "avg(CASE WHEN error IS NULL OR error!='Blocked' THEN duration_ms END) FROM ledger"
+            ).fetchone()
+            analysis_ms = db.execute(
+                "SELECT avg(duration) FROM (SELECT sum(duration_ms) AS duration FROM ledger GROUP BY case_id)"
+            ).fetchone()[0]
+            pending = db.execute("SELECT count(*) FROM inbox WHERE case_id IS NULL").fetchone()[0]
+        return {
+            "alerts_received": alerts,
+            "incidents": cases,
+            "unprocessed_alerts": pending,
+            "last_alert_at": last,
+            "llm_calls": calls - blocked,
+            "blocked_egress": blocked,
+            "llm_errors": errors,
+            "average_call_ms": call_ms,
+            "average_analysis_ms": analysis_ms,
+        }

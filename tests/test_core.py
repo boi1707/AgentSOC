@@ -156,6 +156,23 @@ def test_malformed_live_output_is_audited(settings):
         assert db.execute("SELECT error FROM ledger").fetchone()[0] == "JSONDecodeError"
 
 
+def test_live_schema_failure_is_audited(settings):
+    settings.llm_mode = "live"
+
+    def post(*args, **kwargs):
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"unexpected":"value"}'}}]},
+            request=httpx.Request("POST", "https://example.com"),
+        )
+
+    store = Store(settings.db)
+    with pytest.raises(ValueError):
+        LLM(settings, store, post=post).ask(Anon(), "c1", "net", "JSON", [], [])
+    with store.connect() as db:
+        assert db.execute("SELECT error FROM ledger").fetchone()[0] == "ValidationError"
+
+
 @pytest.mark.parametrize("confidence,ids", [(0.5, ["n1"]), (0.99, ["invented"]), (0.99, ["n1", "invented"])])
 def test_downgrade_ungrounded_or_low_confidence(settings, confidence, ids):
     class Fake:

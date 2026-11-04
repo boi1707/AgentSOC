@@ -51,7 +51,7 @@ def norm(alert, host_ips=None):
 class Grouper:
     def __init__(self, gap=600, quiet=30, hi=12, cap=40, host_ips=None):
         self.gap, self.quiet, self.hi, self.cap = gap, quiet, hi, cap
-        self.host_ips = host_ips or {"10.8.0.3": "192.168.10.20"}
+        self.host_ips = {"10.8.0.3": "192.168.10.20"} if host_ips is None else host_ips
         self.inc = []
 
     def add(self, alert, now=None):
