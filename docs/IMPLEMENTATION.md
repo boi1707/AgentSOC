@@ -1,62 +1,50 @@
-# Phạm vi triển khai AgentSOC
+# Phạm vi nghiệm thu AgentSOC v2
 
-## Hoàn thành trong repo
+## Đã triển khai trong repo
 
-- Chuẩn hóa Snort JSON và Sysmon Wazuh, map IP WireGuard → LAN.
-- Gom theo IP liên quan trong 10 phút, im lặng 30 giây hoặc level ≥12; dedupe có giữ nguồn/đích.
-- Tối đa 40 dòng context, ưu tiên mức nghiêm trọng cao; hiển thị số dòng bị cắt.
-- Inbox SQLite chống trùng ID, case UUID, phục hồi hàng đợi sau restart.
-- Pseudonymization một mapping mỗi incident, quét độc lập trước egress, không có ANON=0.
-- Ba agent network/host/judge, Pydantic schema, lọc ID bịa và hạ verdict khi không đủ bằng chứng.
-- Judge nhận bằng chứng đã che cùng kết luận, không chỉ nhận văn bản tóm tắt.
-- Ledger lưu messages/response/usage/duration/error, riêng DB cho mapping và log thật.
-- UI review có xác thực, escape HTML, header chống CSRF, approve/reject và claim nguyên tử.
-- Chặn mặc định dry-run; SSH pin host key; gateway chỉ cho phép subnet attacker của lab.
-- Ledger hành động, trạng thái action_unknown nếu crash/timeout không rõ kết quả.
-- Fixture/demo offline, replay API JSON/JSONL theo tốc độ, đánh giá nhãn alert và GitHub Actions.
-- Log JSON stdout/file, xoay file, lọc secret và stack không chứa exception message.
-- Health/metrics bền vững qua restart, audit lần bị guard chặn với placeholder an toàn.
-- Script setup VPS, mẫu WireGuard/authorized_keys, runtime/dev dependency lock.
+- Console React/TypeScript/Tailwind/Lucide: overview, alerts/detail, incidents/detail, role outcomes,
+  run/ledger timeline, response queue/history, system health, audit và operator creation.
+- Versioned API, server pagination/filter/sort và global aggregates; cùng origin, typed request/read schemas.
+- Server-side sessions, viewer/analyst/approver/admin, HttpOnly/SameSite cookie, CSRF và write audit.
+- Wazuh adapter giữ raw/normalized/source/external ID/time/schema; network, Sysmon, Linux auth, FIM/generic.
+- Idempotency source/external ID; alert không có safe entity được giữ uncorrelated, không gom unknown.
+- Correlation received-time/entity, dedup/count/all original evidence links; CAP chỉ cắt model context.
+- Additive migration giữ dữ liệu prototype, backup script, không dựng run metadata lịch sử giả.
+- API không khởi chạy worker mặc định; worker riêng dùng SQLite job claim/lease/heartbeat/retry/dead-letter.
+- Investigation run có snapshot/cutoff, prompt/provider/model attribution, typed role results và step states.
+- Ba read-only tools scoped/bounded, dùng parameter binding, deadline, audit và guarded results.
+- Egress guard trước model, input cap, output token cap, mock/live provider boundary, không silent fallback.
+- Replay tạo run mới, cutoff enforce ở retrieval, không ghi đè actionable verdict, Telegram hoặc response.
+- Response lưu intent trước executor, actor/evidence/mode/result; policy recheck và atomic single execution.
+- Response crash/timeout action_unknown, không tự SSH retry; verification chưa đo ghi not_verified.
+- Demo database/volume riêng, synthetic ở storage/UI, pipeline thật + mock, không seed AI outcomes.
+- Docker multi-stage console/runtime, API + worker, private data volume, default localhost, log rotation.
+- CI có backend, console/browser và Docker jobs; chỉ có kết quả CI sau khi owner push và workflow chạy.
 
-## Khác với code mẫu HTML
+## Cần nghiệm thu trên môi trường thật (không làm tự động ở lần này)
 
-Không dùng Wazuh `shuffle` gửi vào endpoint generic: dùng integration riêng có bearer token.
-Không cho secret vào URL review. Không dùng `StrictHostKeyChecking=accept-new` khi chặn.
-Không tự retry lệnh chặn bị gián đoạn và không tự động hành động từ verdict.
-Tỷ lệ gộp cảnh báo là consolidation, **không** đồng nghĩa tỷ lệ giảm false positive.
-Các ngưỡng 80%, latency 10–15s, leakage=0 là mục tiêu cần đo trên tập test, không phải kết quả.
+1. Docker build/up trên daemon Linux; mapping UID 10001, persistence và migrations của deployment thực.
+2. Alert Wazuh/Snort/Sysmon thực tế qua integration đang triển khai; adapter fixtures không thay kiểm tra này.
+3. Hosted LLM thật, quota/error, model response_format và usage; opt-in test cần --live-provider.
+4. Telegram thật và SSH/gateway/nftables TTL 1h; không gọi chúng khi demo/test.
+5. Load, RAM/CPU/disk cạnh Wazuh, retention và giới hạn SQLite ở lưu lượng mong muốn.
+6. Ground truth thật, precision/recall, latency/chi phí và ablation; không dùng mock làm kết quả phát hiện.
 
-## Chưa hoàn thành vì phụ thuộc môi trường thật
+## Giới hạn còn lại
 
-1. VPS Ubuntu, Docker, Wazuh stack, WireGuard và firewall.
-2. Gateway Snort 3/nftables, Windows Sysmon/Wazuh agent, Kali và định tuyến qua gateway.
-3. Xác nhận field/rule đúng phiên bản Wazuh/Snort, forward alert thật vào inbox.
-4. Gọi LLM thật bằng dữ liệu lab đã rà soát, test lỗi/quota và kiểm tra ledger.
-5. Telegram thật; SSH forced command, block TTL 1h và kiểm tra trước/sau duyệt.
-6. Bộ dữ liệu gán nhãn, replay cố định và ablation A–D. Raw baseline chỉ xây riêng cho dữ liệu
-   lab tổng hợp, không tắt guard của dịch vụ production.
-7. Thu thập số đo thật. Công cụ metrics đã tính precision/recall cấp alert từ CSV,
-   latency end-to-end và USD khi có usage/đơn giá; chưa có tập nhãn và kết quả thực nghiệm.
+Single workspace, chưa SSO/multi-tenant/RLS; chưa PostgreSQL adapter. SQLite write serialization và
+rebuild pending window mỗi tick chưa benchmark. Chưa audit append-only/chống sửa; notifications vẫn
+best-effort, integration không có pre-ingest spool. Pattern/tokenization không loại bỏ mọi PII tùy ý.
+Không có local LLM/Ollama, entity graph, threat-intel hay detection engine mới. Verification SSH thực
+không tự probe nftables; không suy ra connected từ configured. Legacy reviewer credential vẫn có
+quyền duyệt để tương thích, cần hạn chế quyền truy cập credential đó.
 
-## Giới hạn prototype
+## Acceptance path đã tự động hóa
 
-- Một reviewer shared credential, chưa có RBAC/multi-user hoặc audit danh tính cá nhân.
-- SQLite và worker đơn: không scale nhiều replicas; inbox được dựng lại mỗi vòng nên cần benchmark
-  hoặc queue riêng khi traffic lớn. LLM calls tuần tự, có timeout 30 giây mỗi call.
-- Wazuh integration gửi một lần; nếu dịch vụ ngừng, cần replay từ alerts.json, chưa có spool/retry
-  bền vững trước khi nhận vào inbox. Sau khi nhận, hàng đợi là durable.
-- Lỗi phân tích chuyển review, không tự retry LLM để tránh chi phí lặp ngoài ý muốn.
-- Ledger là audit vận hành, chưa phải append-only/chống sửa bằng mật mã.
-- Token hóa bằng regex/danh sách, không phải chứng minh loại bỏ toàn bộ PII.
-- Telegram best-effort, thất bại không làm mất case; chưa có hàng đợi retry thông báo.
-- IP blocking IPv4 lab; script gateway mặc định chỉ chặn 192.168.20.0/24, trừ gateway .1.
+Fixture Wazuh → custom integration/HTTP thật → SQLite → worker process riêng → correlation →
+read-only tools → mock Net/Host/Judge → run/ledger → API/React → note/review dry-run. Browser smoke
+bắt đầu từ DB rỗng, không seed case/outcome, kiểm tra các màn hình và không có JavaScript page error.
+Unit/integration tests còn kiểm migration, leases, retry, RBAC/CSRF, duplicate approval, scoped replay,
+SQL-bound filters/aggregates và absence của credentials/restore map trong API.
 
-## Nghiệm thu trên lab
-
-- Không đăng nhập: `/cases` bị 401; sai bearer: `/ingest` bị 401.
-- Gửi Snort và Sysmon cùng host: một case, ba ledger calls; raw IP không nằm trong prompt.
-- Chưa approve: nft set trống. Reject: không có SSH. Duyệt lặp: 409.
-- Key forced-command chạy `id` phải bị từ chối; IP máy bảo vệ không được chặn.
-- Approve hợp lệ: nft có đúng IP nguồn; lưu action và xác nhận hết hạn sau 1 giờ.
-- Restart service trước phân tích: alert vẫn còn. Crash khi đang chặn: action_unknown, kiểm tra tay.
-- Export cùng bộ alert và nhãn trước khi so sánh các cấu hình, ghi rõ phiên bản/model/seed/date.
+Xem ARCHITECTURE.md, ARCHITECTURE_COMPARISON.md, DEPLOYMENT.md và UPGRADE.md để có quyết định chi tiết.

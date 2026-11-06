@@ -1,227 +1,235 @@
 # AgentSOC
-An evidence-driven LLM system for security incident analysis and human-reviewed response.
 
-Backend prototype: Wazuh → gom incident → pseudonymization → ba tác tử
-network/endpoint/judge → SQLite ledger → người duyệt → dry-run hoặc SSH forced command.
+Ứng dụng SOC self-hosted cho chuyên viên vận hành: **Wazuh → inbox bền vững → correlation →
+Net/Host/Judge → investigation ledger → human review**. Console React/TypeScript/Tailwind,
+FastAPI và worker riêng, dùng SQLite; không mang một hệ microservices nặng sang VPS.
 
-## Kiến trúc
+Mặc định **không seed dữ liệu**, `LLM_MODE=mock`, `RESPONSE_MODE=dry-run`. Mock được gắn nhãn,
+không phải đánh giá an ninh thật. Không tự tải model, sửa Wazuh/VPN/firewall hay triển khai VPS.
 
-![Sơ đồ kiến trúc AgentSOC: lab local kết nối WireGuard tới VPS và Cloud LLM](docs/images/architecture.svg)
+## Giao diện
 
-Sơ đồ thiết kế AgentSOC, trích từ tài liệu HTML; không biểu thị hạ tầng đã triển khai thực tế.
+Ảnh chụp từ ứng dụng chạy local với database demo cách ly: dữ liệu synthetic được gửi qua
+HTTP ingestion, worker xử lý bằng mock AI và response ở chế độ dry-run. Các số liệu trong ảnh
+minh họa luồng vận hành, không phải kết quả đánh giá phát hiện trên hệ thống thật.
 
-## Chạy trên Windows
+![AgentSOC console: tổng quan cảnh báo, incident và hàng đợi điều tra](docs/images/console-overview.png)
 
-Yêu cầu Python 3.12+; bản này được kiểm thử local trên Python 3.14.
+<details>
+<summary>System health trên mobile</summary>
+
+<img src="docs/images/system-health-mobile.png" alt="AgentSOC System health trên màn hình mobile: database, worker và cấu hình provider" width="390" />
+
+</details>
+
+## Chạy local trên Windows
+
+Cần Python 3.12+ và Node.js 22.12+. Mở đúng folder AgentSOC:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.lock
-Copy-Item .env.example .env
-.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.token_urlsafe(32))"
+.\.venv\Scripts\python.exe -m scripts.dev --build
 ```
 
-Điền hai chuỗi khác nhau vào `INGEST_KEY` và `APPROVE_KEY` trong `.env`.
-Không commit `.env`, database, log thật hoặc khóa SSH.
+Mở **http://127.0.0.1:8000/console**. Launcher tạo `.env` nếu thiếu, sinh hai key ứng dụng
+khác nhau khi trống, build console rồi chạy API + worker tách process. Không in key ra log.
+Đăng nhập `ADMIN_USERNAME` (mặc định `admin`) bằng `ADMIN_PASSWORD`, hoặc `APPROVE_KEY` trong
+`.env` khi admin password để trống. Bootstrap chỉ chạy nếu chưa có users.
+
+`ADMIN_PASSWORD` nếu được đặt phải có ít nhất 24 ký tự. Thay đổi biến này không đổi mật khẩu
+của tài khoản đã tồn tại trong database. `.env`, database, phiên đăng nhập và mật khẩu local
+không được đưa lên Git; bản clone mới không có sẵn tài khoản hay mật khẩu dùng chung.
+
+VS Code: **Tasks → Run Task → AgentSOC: local application**. Có task riêng cho demo và backend tests.
+Chạy Linux tương đương với `.venv/bin/python`; không cần Bash cho launcher local.
+
+Muốn chạy từng process khi phát triển frontend:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --no-access-log
+# Terminal thứ hai:
+.\.venv\Scripts\python.exe -m src.worker
+# Terminal thứ ba, trong frontend:
+npm ci
+npm run dev
 ```
 
-Mở <http://127.0.0.1:8000/cases>, đăng nhập user `reviewer`, password là `APPROVE_KEY`.
-Chạy demo từ terminal khác:
+Vite proxy API cùng origin; không bật CORS wildcard. Production static build được FastAPI phục vụ.
+
+## Demo cách ly
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.replay --url http://127.0.0.1:8000 --fresh
+.\.venv\Scripts\python.exe -m scripts.dev --demo --build
+# Terminal khác, gửi fixture qua ingestion thật:
+.\.venv\Scripts\python.exe -m scripts.replay datasets/demo.jsonl --url http://127.0.0.1:8001 --fresh
 ```
 
-Alert level ≥12 được xử lý ở vòng worker tiếp theo; alert khác chờ 30 giây im lặng.
-Approve ở mặc định `dry-run` chỉ ghi nhận mô phỏng, **không chặn IP thật**.
-Mock có thể cố tình trả `attack` cho fixture demo; không phải bằng chứng về khả năng phát hiện.
+Mở **http://127.0.0.1:8001/console**. Demo dùng `data/demo/agentsoc.db` (hoặc DEMO_DB), không dùng DB
+production; lưu cờ synthetic ở alert/case và hiển thị trong UI. Demo bắt buộc mock/dry-run, tắt
+Telegram, không SSH. Không seed trực tiếp case/verdict: fixture đi qua inbox, worker, tools và agents.
+`--fresh` chỉ dùng demo lại; không dùng khi đối chiếu nhãn dựa trên ID cũ.
 
-## Demo offline và kiểm thử
+## Console
 
-```powershell
-.\.venv\Scripts\python.exe -m scripts.replay
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m ruff check src scripts tests
-.\.venv\Scripts\python.exe -m ruff format --check src scripts tests
-.\.venv\Scripts\python.exe -m scripts.metrics --db data/agentsoc.db
-```
+- Overview: global aggregates, time series alert thật theo received time và backlog.
+- Alerts: filter/pagination phía server, normalized envelope, JSON gốc và liên kết incident.
+- Incidents/detail: workflow riêng, evidence inventory, entity, run timeline, Net/Host/Judge, notes.
+- Investigation ledger: guarded input, structured output, tool/citations, attempts, usage và error.
+- Response review: eligibility phía server, approve/reject và lịch sử; không nhận target do UI chọn.
+- System health: DB, worker heartbeat, job age/dead letters, last alert và provider attribution.
+- Audit: actor, operation, target, time và result. UTC ở storage, timezone rõ trên giao diện.
 
-Demo offline dùng database tạm, không cần `.env`, API key, VPS hay mạng.
-Test gồm HTTP thật trên loopback, worker và SQLite thật; Cloud LLM/SSH được giả lập,
-không gọi dịch vụ bên ngoài hay tường lửa thật.
+Không có graph, threat-intel hay ATT&CK coverage giả. Null/No data nghĩa là chưa có số đo.
+Provider configured không có nghĩa reachable; Wazuh không được gọi connected chỉ vì API đang chạy.
+
+## Phân quyền và response
+
+| Role | Quyền |
+| --- | --- |
+| viewer | Đọc console/evidence/ledger |
+| analyst | Viewer + notes, workflow và replay |
+| approver | Analyst + approve/reject response |
+| admin | Approver + tạo operator qua System health/API |
+
+Session cookie HttpOnly/SameSite=Strict, CSRF token ở memory; không lưu credential trong localStorage.
+Khi dùng HTTPS đặt `SESSION_COOKIE_SECURE=1`. Dùng localhost/VPN hoặc HTTPS, không public HTTP reviewer.
+Client legacy HTTP Basic `reviewer`/APPROVE_KEY vẫn có qua `/cases`; đây là credential compatibility
+có quyền duyệt, không cấp cho viewer/analyst. Mỗi operator nên có tài khoản riêng.
+
+Mọi response vẫn cần người duyệt. Server kiểm tra lại attack/confidence/groundedness, IP nguồn từ
+network evidence được cite, protected networks và mode. Mock/synthetic không được SSH. Intent/actor
+được lưu trước executor; approve lặp không thực thi lại. Crash/timeout mơ hồ là action_unknown, không
+retry SSH. `blocked` chưa có nghĩa đã verification nftables: verification_status vẫn not_verified.
 
 ## Docker
 
-Tạo `.env` với hai key hợp lệ như trên. Trên VPS Linux:
+Không sửa Wazuh stack đã triển khai riêng. Container API giữ cổng 8000 và `/ingest` cho integration.
+Worker dùng chung volume SQLite, không publish cổng. Frontend được multi-stage build và serve cùng API.
 
 ```bash
+cp .env.example .env
+# Tạo hai key khác nhau, điền vào INGEST_KEY và APPROVE_KEY:
+python3 -c "import secrets; print(secrets.token_urlsafe(32)); print(secrets.token_urlsafe(32))"
 mkdir -p data
 sudo chown 10001:10001 data
-docker compose up -d --build
-docker compose ps
+docker compose up -d --build --wait
 make health
-make replay
-make leaks
 ```
 
-Mặc định bind localhost; chỉ đặt `BIND_IP=10.8.0.1` sau khi WireGuard đã hoạt động.
-Container chạy user UID 10001, filesystem read-only ngoài volume dữ liệu. Chỉ dùng **một
-process/replica/worker cho mỗi database**. Không chạy `--workers 2` hoặc hai instance cùng DB.
+Mặc định bind `127.0.0.1`. Chỉ đổi `BIND_IP=10.8.0.1` khi WireGuard hiện có đã hoạt động.
+Image dùng Python 3.12; host Ubuntu 22.04 không cần cài Python 3.12 nếu chỉ chạy Docker.
+Script `bash scripts/setup.sh` là tùy chọn chuẩn bị key/config/data và cần Python 3.12+ trên host;
+nó không cài hoặc chỉnh Wazuh/VPN/firewall. Không dùng `EMBEDDED_WORKER=1` cùng worker container.
 
-## API
-
-| Endpoint | Xác thực | Mục đích |
-| --- | --- | --- |
-| `GET /health` | Không | Kiểm tra DB và chế độ chạy |
-| `GET /metrics` | Reviewer | Bộ đếm bền vững, lỗi LLM/guard và thời gian phân tích |
-| `POST /ingest` | Bearer `INGEST_KEY` | Nhận alert Wazuh, level ≥7, ID chống trùng |
-| `GET /cases` | HTTP Basic `reviewer` / `APPROVE_KEY` | Trang bằng chứng và duyệt |
-| `GET /api/cases` | Reviewer | Danh sách case, khôi phục token cục bộ |
-| `POST /approve/{id}` | Reviewer + `X-AgentSOC-Review: 1` | Duyệt một lần |
-| `POST /reject/{id}` | Reviewer + header như trên | Từ chối một lần |
-
-`/health` trả số case, incident chờ gom/xử lý, alert chưa xử lý, thời điểm nhận alert cuối
-(Unix UTC hoặc `null`), chế độ chạy và trạng thái cấu hình LLM; không trả credential.
-JSON hỏng trả 400; alert sai schema trả 422; payload lớn hơn 256 KiB trả 413.
-
-HTTP Basic chỉ dùng localhost, tunnel WireGuard hoặc HTTPS; không publish HTTP ra Internet.
-Khóa không đi trong query string. Trang review không tải CDN/tài nguyên ngoài.
-
-## LLM và quyền hành động
-
-- Mặc định `LLM_MODE=mock`, `RESPONSE_MODE=dry-run`.
-- Live cần `LLM_MODE=live`, `LLM_URL` HTTPS tương thích JSON chat completion,
-  `LLM_API_KEY`, `LLM_MODEL`. Chọn model hỗ trợ `response_format=json_object` và temperature 0.
-- Luôn pseudonymize cả payload và system prompt; egress guard chạy trước lời gọi mạng.
-  Không có tùy chọn tắt ẩn danh trên service đang chạy.
-- IP riêng/nonglobal, IPv6, email, mẫu API key, hostname đã cấu hình, user/path được che;
-  IPv4 công cộng được giữ để phân tích IOC. Đây là **pseudonymization theo mẫu**, không
-  cam kết phát hiện mọi dữ liệu cá nhân trong chuỗi tùy ý. Thêm hostname thật vào `HOST_NAMES`.
-- Ledger lưu prompt messages, response, evidence IDs, token usage, thời gian và loại lỗi.
-  Giá trị thật và bảng ánh xạ nằm cục bộ trong DB; bảo vệ volume/backup ở cấp hệ điều hành.
-- Chặn chỉ hợp lệ nếu attack, confidence ≥ ngưỡng, evidence IDs hợp lệ và IP là **nguồn
-  của alert mạng đã được trích dẫn**, không thuộc mạng bảo vệ.
-- Mock không được cấu hình SSH. Xem [hướng dẫn triển khai](docs/DEPLOYMENT.md) trước khi bật SSH.
-
-## Trạng thái phạm vi
-
-Đã có backend, SQLite inbox bền vững, ba tác tử, reviewer UI, dry-run, Telegram adapter,
-SSH adapter, gateway forced command, Wazuh integration/rules, demo, audit metrics, CI.
-
-Chưa kiểm chứng trên hạ tầng thật: Docker image, Wazuh/Snort/Sysmon, WireGuard, Telegram,
-Cloud LLM và nftables end-to-end. Cần VPS/lab, key và thông tin truy cập để hoàn tất phần đó.
-Precision/recall, ablation A–D, hiệu quả giảm false positive, chi phí USD và độ trễ mục tiêu
-chưa được đo. Không dùng kết quả mock làm số liệu đồ án.
-
-Xem [kế hoạch nghiệm thu](docs/IMPLEMENTATION.md) và [triển khai hạ tầng](docs/DEPLOYMENT.md).
-
-## Setup trên VPS
-
-Trên Ubuntu 22.04 cần Docker Compose v2, `ip`, `ssh-keygen`; nếu dùng script setup còn cần
-Python 3.12+ và module venv. Python mặc định của Ubuntu 22.04 là 3.10, nên phải chuẩn bị
-Python 3.12 trước hoặc dùng cách Docker thủ công ở trên (container đã có Python 3.12).
+Demo Docker hoàn toàn riêng, volume riêng:
 
 ```bash
-bash scripts/setup.sh
-# Script tạo .env nếu chưa có, sinh hai khóa ứng dụng, kiểm tra cấu hình/BIND_IP,
-# tạo data/block_key nếu thiếu, in public key và đặt owner dữ liệu cho container.
-# Điền LLM/Telegram vào .env nếu cần; mặc định mock + dry-run không gọi dịch vụ ngoài.
-make up
-make health
+make demo
 make replay
+# UI demo: http://127.0.0.1:8001/console
+make demo-down
 ```
 
-Script không thay thế SSH key đã có, không ghi đè `.env` hiện hữu, không tự thêm host key
-gateway và không tự bật chặn thật. Mẫu WireGuard nằm trong `config/wireguard/`; mẫu khóa
-công khai bị giới hạn quyền nằm trong `config/authorized_keys.example`.
+`make down` giữ volume/data. Đọc [nâng cấp và backup](docs/UPGRADE.md) trước khi thay version đang có dữ liệu.
 
-## Cấu hình môi trường
+## Wazuh và API
 
-| Biến | Mặc định | Ý nghĩa |
+Giữ `scripts/custom-agentsoc`, bearer INGEST_KEY và `POST /ingest`. Wazuh integration/rules hiện có
+ở `config/wazuh/`; việc cài chúng vào manager do operator thực hiện riêng.
+WAZUH_SOURCE_ID do server cấu hình, không tin source field do payload/model gửi.
+Wazuh level 0–15 được kiểm tra; level dưới 7 giữ contract cũ: accepted=false/below_level_7.
+Alert hợp lệ thiếu entity vẫn lưu uncorrelated, không mất dữ liệu hay gom vào unknown bucket.
+
+| Endpoint | Auth | Chức năng |
 | --- | --- | --- |
-| `INGEST_KEY` | bắt buộc | Bearer token nhận alert, ít nhất 24 ký tự |
-| `APPROVE_KEY` | bắt buộc | Mật khẩu reviewer, khác INGEST_KEY, ít nhất 24 ký tự |
-| `DB` | `data/agentsoc.db` | SQLite; với Docker phải nằm trong volume data |
-| `BIND_IP` | `127.0.0.1` | Địa chỉ host publish cổng 8000 |
-| `LLM_MODE` | `mock` | `mock` offline hoặc `live` |
-| `LLM_URL` | trống | URL HTTPS chat completions; bắt buộc ở live |
-| `LLM_API_KEY` | trống | Bearer key LLM; bắt buộc ở live |
-| `LLM_MODEL` | trống | Model hỗ trợ JSON; bắt buộc ở live |
-| `MIN_CONFIDENCE` | `0.85` | Ngưỡng confidence để xét chặn, trong [0,1] |
-| `QUIET_SECONDS` | `30` | Im lặng trước khi phân tích |
-| `GAP_SECONDS` | `600` | Khoảng cách tối đa khi gom alert chung IP |
-| `POLL_SECONDS` | `2` | Chu kỳ worker |
-| `HI_LEVEL` | `12` | Level Wazuh kích hoạt phân tích sớm, từ 0 đến 15 |
-| `CAP` | `40` | Số dòng bằng chứng tối đa, từ 1 đến 40 |
-| `LOG_LEVEL` | `INFO` | DEBUG, INFO, WARNING, ERROR hoặc CRITICAL |
-| `HOST_IPS` | xem .env.example | JSON map IP WireGuard của host sang IP LAN |
-| `HOST_NAMES` | `win-victim,gateway,kali` | Tên host cần che, phân cách dấu phẩy |
-| `RESPONSE_MODE` | `dry-run` | `dry-run` mô phỏng hoặc `ssh` thực thi sau duyệt |
-| `GATEWAY` | `10.8.0.2` | IPv4 gateway |
-| `SSH_KEY` | `data/block_key` | Private key chỉ được chạy forced command |
-| `KNOWN_HOSTS` | `data/known_hosts` | Host key đã kiểm tra fingerprint |
-| `TG_TOKEN` | trống | Token bot; phải cấu hình cùng TG_CHAT |
-| `TG_CHAT` | trống | Chat nhận ID case và verdict, không nhận log thô |
+| `/live` | Không | Liveness |
+| `/health` | Không | DB + counters tương thích |
+| `/ready` | Không | DB và worker heartbeat mới |
+| `POST /ingest` | Bearer | Raw + normalized durable ingestion |
+| `/api/v1/auth/login`, `/auth/me`, `/auth/logout` | Session | Đăng nhập/session/CSRF |
+| `/api/v1/overview`, `/system` | Viewer | Global metrics, timeline và health |
+| `/api/v1/alerts`, `/alerts/{id}` | Viewer | Filter/pagination và raw/normalized detail |
+| `/api/v1/incidents`, `/incidents/{id}` | Viewer | Workflow, evidence, runs, actions |
+| `POST /api/v1/incidents/{id}/notes`, `PATCH .../workflow` | Analyst | Audited writes |
+| `POST /api/v1/incidents/{id}/replay` | Analyst | Run mới từ parent snapshot/cutoff |
+| `/api/v1/runs/{id}`, `/ledger`, `/ledger/{id}` | Viewer | Steps, tools, outputs và usage |
+| `POST /api/v1/incidents/{id}/response` | Approver | Decision + current proposal run ID |
+| `/api/v1/audit` | Viewer | Actor/action/target/result |
+| `POST /api/v1/users` | Admin | Tạo operator |
 
-## Đọc log và xử lý sự cố
+Các path viết tắt ở cùng hàng đều thuộc `/api/v1`. Xem `/docs` của API để có OpenAPI schema.
+Pagination limit tối đa 100, sort received/created + ID ổn định. Alerts hỗ trợ severity, source,
+entity, correlation status, thời gian và search; incidents có workflow/severity/source/entity/time.
+Số tổng hợp tính trên toàn bộ tập filter, không chỉ trang hiện tại. JSON hỏng trả 400, schema sai
+422, body vượt 256 KiB trả 413; errors API v1 có envelope nhất quán và không echo raw sensitive input.
 
-Log nghiệp vụ là JSON mỗi dòng, ra stdout và `data/logs/agentsoc.log`, xoay 10 MiB × 5
-bản sao. Docker cũng xoay stdout 10 MB × 5. Exception chỉ lưu loại lỗi và vị trí stack,
-không lưu exception message, source code hay biến cục bộ có thể chứa secret.
+## Cấu hình
+
+`.env.example` không có secret thật. Hai key bắt buộc khác nhau, dài ít nhất 24 ký tự.
+
+| Nhóm | Biến |
+| --- | --- |
+| Storage/network | DB, BIND_IP, WAZUH_SOURCE_ID |
+| Identity | INGEST_KEY, APPROVE_KEY, ADMIN_USERNAME, ADMIN_PASSWORD, SESSION_COOKIE_SECURE |
+| AI | LLM_MODE=mock/live, LLM_URL, LLM_API_KEY, LLM_MODEL, MIN_CONFIDENCE |
+| Correlation | QUIET_SECONDS, GAP_SECONDS, HI_LEVEL, CAP, HOST_IPS JSON, HOST_NAMES |
+| Worker | POLL_SECONDS, EMBEDDED_WORKER=0, JOB_LEASE_SECONDS=120 |
+| Response | RESPONSE_MODE=dry-run/ssh, GATEWAY, SSH_KEY, KNOWN_HOSTS |
+| Notifications | TG_TOKEN và TG_CHAT cùng cấu hình hoặc cùng để trống |
+| Operations/demo | LOG_LEVEL, DEMO_MODE, DEMO_DB |
+
+Live bắt buộc HTTPS endpoint tương thích JSON chat completion, credentials/model đầy đủ. Provider
+URL chỉ lấy từ cấu hình server, không từ model/API. Không tự fallback live → mock. Ollama/local HTTP
+chưa thêm trong lần này, không tải model nặng. Thêm hostname thực vào HOST_NAMES; token hóa theo mẫu
+không cam kết loại bỏ mọi loại PII. Model max output 2048 tokens/call; input cap 256 KiB/call.
+
+## Kiểm thử và vận hành
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check src scripts tests
+.\.venv\Scripts\python.exe -m ruff format --check src scripts tests
+# Trong frontend:
+npm run typecheck
+npm run lint
+npm run build
+npm run test:e2e
+```
+
+Browser test dùng Chrome có sẵn trên Windows hoặc Playwright Chromium; Linux chạy
+`npx playwright install --with-deps chromium` trong frontend trước browser test.
+Test tạo DB riêng, đi qua HTTP thật, worker process riêng và SQLite thật, nhưng dùng mock AI/dry-run;
+không gửi Telegram, chạy SSH thật hoặc tiêu tiền cloud API. Live integration chưa được bật tự động.
 
 ```bash
 make logs
-tail -f data/logs/agentsoc.log | jq '{ts,level,event,case_id}'
-grep 'llm.blocked' data/logs/agentsoc.log
-```
-
-- Không bind được BIND_IP: kiểm tra `ip addr`, bật WireGuard trước, dùng localhost khi chưa có VPN.
-- Container báo permission denied: kiểm tra owner `data` là UID/GID 10001; không chmod 777.
-- Wazuh không gửi được: kiểm tra route container → VPS, URL `/ingest`, bearer INGEST_KEY,
-  và quyền chạy integration trên manager. Cảnh báo gửi lỗi cần replay lại từ alerts.json.
-- SSH bị từ chối: kiểm tra forced command, quyền key, fingerprint trong KNOWN_HOSTS và IP nguồn VPN.
-- `llm.blocked`: guard đã từ chối gửi. Xem case review, kiểm tra field/token hóa bằng dữ liệu lab;
-  không tắt guard để vượt lỗi. Ledger chỉ lưu placeholder an toàn cho lần bị chặn.
-- `action_unknown`: kiểm tra nftables trên gateway trước khi xử lý tay; hệ thống không tự retry.
-
-## Replay và đánh giá
-
-```bash
-# JSONL Wazuh, JSON array hoặc một alert JSON; giữ ID để so với ground truth.
-python -m scripts.replay alerts.json --url http://127.0.0.1:8000 --speed 10
+# API: data/logs/agentsoc.log; worker: data/logs/agentsoc-worker.log
 python -m scripts.check_leaks --db data/agentsoc.db
 python -m scripts.metrics --db data/agentsoc.db --ground-truth data/labels.csv
-# Trong container; đặt nhãn dưới ./data để được mount vào:
-make eval ARGS="--ground-truth data/labels.csv"
+python -m scripts.replay alerts.json --url http://127.0.0.1:8000 --speed 10
 ```
 
-CSV dùng `alert_id,label`, label là `attack` hoặc `benign`, mỗi ID một dòng. Đây là nhãn alert
-liên kết tới case, khác CSV kế hoạch phiên thử nghiệm trong `redteam/ground_truth/`.
-Precision/recall tính ở cấp alert; verdict review tính là không dự đoán attack. Alert còn chờ,
-ID không có trong inbox và case mock bị loại được đếm riêng, không lặng lẽ coi là benign.
-`--include-mock` chỉ dùng kiểm tra công cụ bằng fixture, không tạo số đo phát hiện thật.
+Replay CLI nhận JSON/JSONL, speed 0 gửi ngay, 1 thời gian thật, 10 nhanh gấp 10. Timed replay cần
+source timestamp có timezone và thứ tự tăng dần. Replay investigation trong console khác replay
+alert: tạo run mới từ evidence snapshot/cutoff, không ghi đè run cũ hay thực thi response.
 
-Chi phí chỉ tính khi có token usage đầy đủ và cung cấp cả `--input-usd-per-million` và
-`--output-usd-per-million` theo model đã sử dụng. Không có số đo thì trả `null`.
-Script đọc DB ở chế độ read-only, không tạo database rỗng nếu nhập sai đường dẫn.
-`--speed 0` gửi ngay; 1 theo thời gian thật; 10 nhanh gấp 10. Timed replay cần timestamp
-có timezone, xếp tăng dần. `--fresh` đổi ID chỉ để demo lại, không dùng với nhãn ID cũ.
+CSV đánh giá dùng `alert_id,label` (attack/benign), khác schema kế hoạch redteam. Precision/recall ở
+cấp alert, review tính là không dự đoán attack; pending/excluded và label thiếu inbox được đếm riêng.
+Mock bị loại mặc định. Chi phí chỉ có khi đủ usage và cung cấp cả hai đơn giá qua
+`--input-usd-per-million`, `--output-usd-per-million`; thiếu số đo trả null, không bịa 0.
 
-## Quyết định thiết kế và thay đổi so với bản gốc
+## Tài liệu và giới hạn
 
-Giữ tên AgentSOC và cấu trúc repo của nhóm. Dùng `settings.py`, `storage.py` và `config/`
-làm nguồn duy nhất, không tạo bản sao `config.py`, `llm.db()` hoặc thư mục deploy trùng nội dung.
-Giữ HTTP Basic và header review thay cho khóa trong query string; giữ `mock`/`dry-run`
-thay cho cờ tắt ẩn danh. TTL chặn cố định 1 giờ ở forced command, không nhận lệnh tùy ý từ model.
+- [Kiến trúc và trạng thái](docs/ARCHITECTURE.md)
+- [Khảo sát AgentSOC/AiSOC, SHA và license](docs/ARCHITECTURE_COMPARISON.md)
+- [Triển khai cùng hạ tầng hiện hữu](docs/DEPLOYMENT.md)
+- [Migration, backup, rollback và tương thích](docs/UPGRADE.md)
+- [Phạm vi nghiệm thu](docs/IMPLEMENTATION.md)
+- [Kết quả kiểm thử local và các mục chưa xác minh](docs/VALIDATION.md)
 
-Đã sửa: guard bị chặn trước đây không có bản ghi audit; config chấp nhận NaN/Infinity;
-level 16 ngoài thang Wazuh; HOST_IPS rỗng bị thay bằng map mặc định; phản hồi sai schema
-chưa được đánh dấu lỗi trong ledger. Đã bổ sung log, health/metrics, setup, timed replay,
-đánh giá nhãn, lock dependency và kiểm tra Docker trong CI. Xóa các placeholder thư mục rỗng
-không có đường chạy; giữ dữ liệu/demo có nhãn và toàn bộ tài liệu redteam của nhóm.
-
-Giữ `.env`, DB, log và private key ngoài Git; hạn chế quyền đọc volume/backup và chỉ mở UI
-qua localhost/VPN/HTTPS. CI có bài dựng container; trạng thái chạy CI chỉ xác nhận sau khi push.
+Chưa đo RAM/CPU/throughput trên VPS đang chạy Wazuh, độ chính xác bằng nhãn thật hay chi phí model
+thật. Không dùng số mock làm số liệu đồ án. SQLite hiện dành cho một workspace; chưa SSO,
+multi-tenant, audit chống sửa hoặc notification spool/retry. Docker và kết nối VPS/Wazuh/LLM/
+Telegram/SSH chỉ được đánh dấu đạt sau khi chạy ở môi trường tương ứng. Không publish datastore.
+License của dependencies được giữ tại `/THIRD_PARTY_NOTICES.txt` trong console build.

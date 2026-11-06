@@ -28,6 +28,7 @@ def test_real_http_pipeline_and_review(tmp_path):
         "POLL_SECONDS": "0.05",
         "TG_TOKEN": "",
         "TG_CHAT": "",
+        "EMBEDDED_WORKER": "0",
     }
     process = subprocess.Popen(
         [
@@ -44,6 +45,9 @@ def test_real_http_pipeline_and_review(tmp_path):
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+    )
+    worker = subprocess.Popen(
+        [sys.executable, "-m", "src.worker"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
     url = f"http://127.0.0.1:{port}"
     try:
@@ -90,8 +94,8 @@ def test_real_http_pipeline_and_review(tmp_path):
             )
             metrics = client.get("/metrics", auth=("reviewer", review)).json()
             assert metrics["alerts_received"] == 2 and metrics["llm_calls"] == 3
-            logs = (tmp_path / "logs" / "agentsoc.log").read_text(encoding="utf-8")
-            events = [json.loads(line)["event"] for line in logs.splitlines()]
+            logs = "\n".join(path.read_text(encoding="utf-8") for path in (tmp_path / "logs").glob("*.log"))
+            events = [json.loads(line)["event"] for line in logs.splitlines() if line.strip()]
             assert {
                 "service.started",
                 "alert.received",
@@ -103,6 +107,8 @@ def test_real_http_pipeline_and_review(tmp_path):
             } <= set(events)
             assert key not in logs and review not in logs and "192.168.20.50" not in logs
     finally:
+        worker.terminate()
+        worker.wait(timeout=10)
         process.terminate()
         try:
             process.wait(timeout=10)

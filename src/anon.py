@@ -30,8 +30,9 @@ def internal(value):
 
 
 class Anon:
-    def __init__(self, hosts=("win-victim", "gateway", "kali")):
+    def __init__(self, hosts=("win-victim", "gateway", "kali"), *, secrets=()):
         self.fwd, self.rev, self.count = {}, {}, {}
+        self.secrets = tuple(v for v in secrets if v)
         names = [re.escape(h) for h in hosts if h]
         self.host = re.compile(
             r"\b(?:DESKTOP-[A-Z0-9]{5,}" + ("|" + "|".join(names) if names else "") + r")\b", re.I
@@ -47,6 +48,14 @@ class Anon:
         return self.fwd[value]
 
     def clean(self, text):
+        for value in self.secrets:
+            if value in text:
+                text = text.replace(value, self.tok("SECRET", value))
+        # Structured host/user fields may introduce names not in HOST_NAMES.
+        # Reuse their existing token when the same entity appears in tool arguments or prose.
+        for value in sorted(self.fwd, key=len, reverse=True):
+            if value:
+                text = re.sub(r"(?<!\w)" + re.escape(value) + r"(?!\w)", lambda _: self.fwd[value], text)
         for kind, pattern in (("SECRET", SECRET), ("MAIL", EMAIL), ("HOST", self.host), ("USER", USER)):
             text = pattern.sub(lambda m: self.tok(kind, m.group()), text)
 
@@ -81,7 +90,7 @@ class Anon:
         return value
 
     def leaks(self, text):
-        found = [v for v in self.fwd if v and v in text]
+        found = [v for v in (*self.fwd, *self.secrets) if v and v in text]
         for pattern in (SECRET, EMAIL, self.host, USER):
             found.extend(m.group() for m in pattern.finditer(text) if not TOKEN.fullmatch(m.group()))
         for pattern in (IPV4, IPV6):

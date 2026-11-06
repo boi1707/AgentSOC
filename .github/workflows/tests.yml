@@ -36,15 +36,35 @@ jobs:
           sudo chown 10001:10001 data
       - run: docker compose config --quiet
       - run: docker compose up -d --build --wait --wait-timeout 120
-      - run: make health && make replay
+      - run: make health
+      - run: docker compose exec -T agentsoc-backend python -c "import sqlite3; assert sqlite3.connect('data/agentsoc.db').execute('select count(*) from inbox').fetchone()[0] == 0"
+      - run: docker compose down
+      - run: make demo && make replay
       - run: |
           for attempt in $(seq 1 30); do
-            if docker compose exec -T agentsoc-backend python -c "import sqlite3; db=sqlite3.connect('data/agentsoc.db'); assert db.execute(\"select count(*) from cases where status='pending'\").fetchone()[0] == 1; assert db.execute('select count(*) from ledger').fetchone()[0] == 3"; then break; fi
+            if docker compose -f docker-compose.demo.yml exec -T api python -c "import sqlite3; db=sqlite3.connect('data/demo/agentsoc.db'); assert db.execute(\"select count(*) from cases where status='pending'\").fetchone()[0] == 1; assert db.execute(\"select count(*) from ledger where agent in ('net','host','judge')\").fetchone()[0] == 3; assert db.execute('select count(*) from inbox where synthetic=1').fetchone()[0] == 2"; then break; fi
             if [ "$attempt" -eq 30 ]; then exit 1; fi
             sleep 1
           done
-          make leaks
+          docker compose -f docker-compose.demo.yml exec -T api python -m scripts.check_leaks
       - if: failure()
         run: docker compose logs --tail=100
       - if: always()
-        run: docker compose down
+        run: docker compose down && docker compose -f docker-compose.demo.yml down
+  console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m venv .venv && .venv/bin/python -m pip install -r requirements-dev.lock
+      - run: npm ci && npm run typecheck && npm run lint && npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium && npm run test:e2e
+        working-directory: frontend

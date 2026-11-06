@@ -231,3 +231,9 @@ certs/*
 .env.*
 !.env.example
 reports/
+.reference/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo

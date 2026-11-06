@@ -1,21 +1,57 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "AgentSOC: local backend",
-			"type": "shell",
-			"command": "${workspaceFolder}/.venv/Scripts/python.exe",
-			"args": [
-				"-m",
-				"uvicorn",
-				"src.api.main:app",
-				"--host",
-				"127.0.0.1",
-				"--port",
-				"8000"
-			],
-			"isBackground": true,
-			"problemMatcher": []
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "AgentSOC: local application",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "command": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "args": [
+        "-m",
+        "scripts.dev",
+        "--build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "AgentSOC: isolated demo",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "command": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "args": [
+        "-m",
+        "scripts.dev",
+        "--demo",
+        "--build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "AgentSOC: backend tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "command": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "args": [
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
 }

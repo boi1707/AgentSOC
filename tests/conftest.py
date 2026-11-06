@@ -3,6 +3,15 @@ import pytest
 from src.settings import Settings
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--live-provider",
+        action="store_true",
+        default=False,
+        help="Explicitly allow a paid HTTPS LLM request in the opt-in live test",
+    )
+
+
 @pytest.fixture
 def settings(tmp_path):
     return Settings(db=str(tmp_path / "test.db"), ingest_key="i" * 32, approve_key="r" * 32)

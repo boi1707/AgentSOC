@@ -31,7 +31,10 @@ def test_auth_and_validation(client, settings):
     assert client.post("/ingest", json=snort(), headers=headers).json()["accepted"]
     assert not client.post("/ingest", json=snort(), headers=headers).json()["accepted"]
     assert (
-        client.post("/ingest", json={"id": "bad", "data": {}, "rule": {}}, headers=headers).status_code == 422
+        client.post(
+            "/ingest", json={"id": "bad", "data": {}, "rule": {"level": "invalid"}}, headers=headers
+        ).status_code
+        == 422
     )
     assert (
         client.post("/ingest", json=snort("low", level=3), headers=headers).json()["reason"]
@@ -141,7 +144,7 @@ def test_lifespan_worker_processes_alert(settings):
     import time
 
     settings.poll = 0.01
-    with TestClient(create_app(settings)) as client:
+    with TestClient(create_app(settings, worker=True)) as client:
         headers = {"Authorization": "Bearer " + settings.ingest_key}
         assert client.post("/ingest", json=windows(), headers=headers).status_code == 202
         end = time.monotonic() + 3

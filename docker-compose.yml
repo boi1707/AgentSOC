@@ -4,6 +4,8 @@ services:
     ports:
       - "${BIND_IP:-127.0.0.1}:8000:8000"
     env_file: .env
+    environment:
+      EMBEDDED_WORKER: "0"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -23,5 +25,32 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 30s
+      timeout: 5s
+      retries: 3
+  agentsoc-worker:
+    build: .
+    command: ["python", "-m", "src.worker"]
+    env_file: .env
+    environment:
+      EMBEDDED_WORKER: "0"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    depends_on:
+      agentsoc-backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-m", "src.worker", "--health"]
+      interval: 15s
       timeout: 5s
       retries: 3

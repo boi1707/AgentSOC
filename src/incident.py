@@ -1,51 +1,13 @@
-import ipaddress
 import json
 import time
 from hashlib import sha256
 
-KEEP = (
-    "image",
-    "commandLine",
-    "parentImage",
-    "originalFileName",
-    "user",
-    "destinationIp",
-    "destinationPort",
-    "sourceIp",
-)
+from .adapters.wazuh import normalize
 
 
 def norm(alert, host_ips=None):
-    data, rule = alert.get("data", {}), alert.get("rule", {})
-    event = data.get("win", {}).get("eventdata", {})
-    agent = alert.get("agent", {})
-    net = any(k in data for k in ("src_addr", "srcip"))
-    src = data.get("src_addr", data.get("srcip")) if net else event.get("sourceIp")
-    dst = data.get("dst_addr", data.get("dstip")) if net else event.get("destinationIp")
-    # A network sensor's management IP must not merge all unrelated flows.
-    host = None if net else (host_ips or {}).get(agent.get("ip"), agent.get("ip"))
-    ips = set()
-    for candidate in (src, dst, host):
-        try:
-            ips.add(str(ipaddress.ip_address(candidate)))
-        except (ValueError, TypeError):
-            pass
-    row = {
-        "id": str(alert["id"]),
-        "level": int(rule.get("level", 0)),
-        "rule": str(rule.get("id", "")),
-        "kind": "net" if net else "host",
-        "description": rule.get("description", ""),
-        "timestamp": alert.get("timestamp"),
-        "hostname": agent.get("name", ""),
-        "src_ip": src,
-        "dst_ip": dst,
-        "host_ip": host,
-    }
-    row.update({k: event[k] for k in KEEP if k in event})
-    if net:
-        row.update(msg=data.get("msg", ""), dst_port=data.get("dst_port"), proto=data.get("proto"))
-    return row, ips
+    value = normalize(alert, host_ips)
+    return value["evidence"], set(value["ips"])
 
 
 class Grouper:
@@ -54,16 +16,18 @@ class Grouper:
         self.host_ips = {"10.8.0.3": "192.168.10.20"} if host_ips is None else host_ips
         self.inc = []
 
-    def add(self, alert, now=None):
+    def add(self, alert, now=None, normalized=None):
         now = time.time() if now is None else now
-        row, ips = norm(alert, self.host_ips)
-        if not ips:
-            raise ValueError("Alert has no valid correlation IP")
-        matches = [i for i in self.inc if i["ips"] & ips and now - i["last"] <= self.gap]
+        value = normalized if normalized is not None else normalize(alert, self.host_ips)
+        row, ips, entities = value["evidence"], set(value["ips"]), set(value["entities"])
+        if not entities:
+            raise ValueError("Alert has no safe correlation entity")
+        matches = [i for i in self.inc if i["entities"] & entities and now - i["last"] <= self.gap]
         if matches:
             incident = matches[0]
             for other in matches[1:]:
                 incident["ips"] |= other["ips"]
+                incident["entities"] |= other["entities"]
                 incident["raw_ids"].extend(other["raw_ids"])
                 incident["hi"] |= other["hi"]
                 for key, value in other["rows"].items():
@@ -73,9 +37,10 @@ class Grouper:
                         incident["rows"][key] = value
                 self.inc.remove(other)
         else:
-            incident = {"ips": set(), "rows": {}, "raw_ids": [], "last": now, "hi": False}
+            incident = {"ips": set(), "entities": set(), "rows": {}, "raw_ids": [], "last": now, "hi": False}
             self.inc.append(incident)
         incident["ips"] |= ips
+        incident["entities"] |= entities
         incident["last"] = now
         incident["hi"] |= row["level"] >= self.hi
         incident["raw_ids"].append(row["id"])
@@ -93,6 +58,7 @@ class Grouper:
                 out.append(
                     {
                         "ips": sorted(incident["ips"]),
+                        "entities": sorted(incident["entities"]),
                         "alerts": rows[: self.cap],
                         "raw_ids": incident["raw_ids"],
                         "dropped_rows": max(0, len(rows) - self.cap),

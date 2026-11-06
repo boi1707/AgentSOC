@@ -7,13 +7,15 @@ import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field
 
-from src import response
+from src import auth, response
+from src.adapters.wazuh import WazuhAlert
 from src.anon import Anon
+from src.api.v1 import health_snapshot, scrub
+from src.api.v1 import router as v1_router
 from src.incident import Grouper, norm
 from src.logs import configure_logging
 from src.service import Service
@@ -22,17 +24,9 @@ from src.settings import Settings
 log = logging.getLogger("agentsoc.api")
 
 
-class Alert(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(min_length=1, max_length=200)
-    rule: dict
-    agent: dict = Field(default_factory=dict)
-    data: dict
-    timestamp: str | None = None
-
-
-def create_app(settings=None, *, worker=True):
+def create_app(settings=None, *, worker=None):
     config = settings or Settings.from_env()
+    worker = config.embedded_worker if worker is None else worker
     basic, bearer = HTTPBasic(auto_error=False), HTTPBearer(auto_error=False)
 
     @asynccontextmanager
@@ -40,8 +34,10 @@ def create_app(settings=None, *, worker=True):
         config.validate()
         configure_logging(config)
         service = Service(config)
-        service.store.recover()
+        service.store.recover(stale_only=True)
         app.state.service = service
+        app.state.settings = config
+        auth.bootstrap(service.store, config)
         log.info(
             "service.started",
             extra={
@@ -78,21 +74,75 @@ def create_app(settings=None, *, worker=True):
             log.info("service.stopped")
 
     app = FastAPI(title="AgentSOC", version="0.1.0", lifespan=lifespan)
+    app.include_router(v1_router)
+
+    @app.get("/live")
+    def live():
+        return {"status": "alive"}
+
+    @app.get("/ready")
+    def ready(request: Request):
+        from fastapi.responses import JSONResponse
+
+        health = health_snapshot(request.app.state.service.store, config)
+        ok = health["worker_fresh"]
+        return JSONResponse(
+            {"status": "ready" if ok else "degraded", "database": "ready", "worker_fresh": ok},
+            status_code=200 if ok else 503,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
         from fastapi.responses import JSONResponse
 
         malformed_json = any(error["type"] == "json_invalid" for error in exc.errors())
+        fields = [{"location": list(error["loc"]), "type": error["type"]} for error in exc.errors()]
         # Do not echo raw rejected input or credentials back to clients.
+        message = "Invalid JSON" if malformed_json else "Invalid request"
         return JSONResponse(
-            {"detail": "Invalid JSON" if malformed_json else "Invalid request"},
+            {"error": {"code": 400 if malformed_json else 422, "message": message, "fields": fields}}
+            if request.url.path.startswith("/api/v1/")
+            else {"detail": message, "fields": fields},
             status_code=400 if malformed_json else 422,
         )
 
+    @app.exception_handler(ResponseValidationError)
+    async def invalid_stored_response(request, exc):
+        from fastapi.responses import JSONResponse
+
+        log.error("response.schema_error")
+        return JSONResponse(
+            {"error": {"code": 500, "message": "Stored data does not match the API contract"}},
+            status_code=500,
+        )
+
+    import sqlite3
+
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request, exc):
+        from fastapi.responses import JSONResponse
+
+        body = (
+            {"error": {"code": exc.status_code, "message": str(exc.detail)}}
+            if request.url.path.startswith("/api/v1/")
+            else {"detail": exc.detail}
+        )
+        return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(sqlite3.Error)
+    async def database_error(request, exc):
+        from fastapi.responses import JSONResponse
+
+        log.error("database.unavailable", extra={"details": {"error_type": type(exc).__name__}})
+        return JSONResponse({"error": {"code": 503, "message": "Database unavailable"}}, status_code=503)
+
     @app.middleware("http")
     async def security_headers(request, call_next):
-        if request.url.path == "/ingest":
+        if request.url.path == "/ingest" or (
+            request.url.path.startswith("/api/v1/") and request.method in {"POST", "PATCH", "PUT"}
+        ):
             size = 0
             # Bound chunked bodies too; do not trust Content-Length.
             async for chunk in request.stream():
@@ -108,7 +158,7 @@ def create_app(settings=None, *, worker=True):
         result.headers["X-Content-Type-Options"] = "nosniff"
         result.headers["Referrer-Policy"] = "no-referrer"
         result.headers["Content-Security-Policy"] = (
-            "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+            "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
             "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         )
         return result
@@ -133,7 +183,7 @@ def create_app(settings=None, *, worker=True):
             count = db.execute("SELECT count(*) FROM cases").fetchone()[0]
             queued = db.execute("SELECT count(*) FROM cases WHERE status='queued'").fetchone()[0]
             pending_rows = db.execute(
-                "SELECT alert,received FROM inbox WHERE case_id IS NULL ORDER BY received,rowid"
+                "SELECT alert,received FROM inbox WHERE case_id IS NULL AND correlation_status='pending' ORDER BY received,rowid"
             ).fetchall()
             last = db.execute("SELECT max(received) FROM inbox").fetchone()[0]
         group = Grouper(
@@ -150,6 +200,7 @@ def create_app(settings=None, *, worker=True):
             "pending_incidents": queued + len(group.inc),
             "unprocessed_alerts": len(pending_rows),
             "last_alert_at": last,
+            "demo": config.demo,
         }
 
     @app.get("/metrics", dependencies=[Depends(reviewer)])
@@ -157,18 +208,20 @@ def create_app(settings=None, *, worker=True):
         return request.app.state.service.store.metrics()
 
     @app.post("/ingest", dependencies=[Depends(ingestion)], status_code=202)
-    def ingest(alert: Alert, request: Request):
-        data = alert.model_dump()
+    def ingest(alert: WazuhAlert, request: Request):
+        data = alert.model_dump(exclude_unset=True)
         try:
             row, ips = norm(data, config.host_ips)
             level = int(data["rule"].get("level", 0))
-            if not ips or not 0 <= level <= 15:
+            if not 0 <= level <= 15:
                 raise ValueError()
         except (ValueError, TypeError, AttributeError, KeyError):
-            raise HTTPException(422, "Malformed Wazuh alert or missing correlation IP") from None
+            raise HTTPException(422, "Malformed Wazuh alert") from None
         if level < 7:
             return {"accepted": False, "reason": "below_level_7"}
-        accepted = request.app.state.service.store.ingest(data)
+        accepted = request.app.state.service.store.ingest(
+            data, host_ips=config.host_ips, synthetic=config.demo, source=config.wazuh_source
+        )
         log.info(
             "alert.received",
             extra={
@@ -181,7 +234,12 @@ def create_app(settings=None, *, worker=True):
                 }
             },
         )
-        return {"accepted": accepted, "id": data["id"]}
+        return {
+            "accepted": accepted,
+            "id": data["id"],
+            "source": config.wazuh_source,
+            "synthetic": config.demo,
+        }
 
     def public_case(case):
         anon = Anon(config.hosts)
@@ -203,7 +261,7 @@ def create_app(settings=None, *, worker=True):
             result["can_approve"] = case["status"] == "pending"
         except ValueError:
             result["can_approve"] = False
-        return result
+        return scrub(result, config)
 
     @app.get("/api/cases", dependencies=[Depends(reviewer)])
     def list_cases(request: Request):
@@ -281,7 +339,7 @@ def create_app(settings=None, *, worker=True):
                 ip = response.candidate(case, config)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from None
-        if not store.claim(cid):
+        if not store.claim(cid, actor="legacy-reviewer", mode=config.response_mode, action=action, ip=ip):
             raise HTTPException(409, "Case is no longer pending")
         status = "rejected"
         if action == "approve":
@@ -303,6 +361,34 @@ def create_app(settings=None, *, worker=True):
             },
         )
         return {"id": cid, "status": status}
+
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse, RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if (dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=dist / "assets"), name="console-assets")
+
+    @app.get("/")
+    def root():
+        return RedirectResponse("/console")
+
+    @app.get("/THIRD_PARTY_NOTICES.txt")
+    def notices():
+        if not (dist / "THIRD_PARTY_NOTICES.txt").is_file():
+            raise HTTPException(404)
+        return FileResponse(dist / "THIRD_PARTY_NOTICES.txt", media_type="text/plain")
+
+    @app.get("/console")
+    @app.get("/console/{path:path}")
+    def console(path: str = ""):
+        if not (dist / "index.html").is_file():
+            raise HTTPException(
+                503, "Console not built. Run npm ci && npm run build in frontend, or use npm run dev."
+            )
+        return FileResponse(dist / "index.html")
 
     return app
 

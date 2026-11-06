@@ -1,20 +1,33 @@
-# Kiểm chứng local — 2026-10-25
+# Validation record
 
-Môi trường: Windows, Python 3.14.4, virtualenv riêng trong repo.
+Validated locally on Windows on 2026-11-06. These results describe the working
+tree; they do not certify a deployed environment.
 
-- Pytest: 48 bài kiểm tra, bao gồm egress fail-closed, private/link-local/IPv6,
-  nguyên vẹn token roundtrip, phân biệt IP nguồn, queue/restart, ledger, schema output lỗi,
-  groundedness/confidence, xác thực API, giới hạn body, HTML escaping, CSRF header,
-  dry-run, từ chối IP sai, atomic claim và forced command gateway.
-- Ruff lint/format và compileall cho source/scripts.
-- Demo offline: 2 alert tổng hợp → 1 case pending → 3 ledger calls mock, không gọi mạng/SSH.
-- Uvicorn local bind 127.0.0.1:8000: `/health` OK, reviewer page 200 sau đăng nhập.
-- HTTP replay: 2 alert được nhận; approve trả dry_run, approve lặp trả 409.
-- Audit DB demo: 3 ledger calls, 0 prompt khớp mẫu guard, 0 token API (mock).
-- `.env`, database và khóa private được Git ignore; không đưa vào commit.
+| Check | Result |
+| --- | --- |
+| Python 3.12 backend suite | 103 passed, 1 skipped |
+| Python 3.14 backend suite | 103 passed, 1 skipped |
+| Ruff lint and format | Passed; 42 Python files formatted |
+| Frontend TypeScript and ESLint | Passed |
+| Vite production build | Passed; JavaScript 309.32 kB / 95.80 kB gzip |
+| Playwright with installed Chrome | 2 passed |
+| npm dependency audit | 0 reported vulnerabilities |
 
-Chưa chạy Docker build (máy không có lệnh docker), LLM API live, Wazuh, Snort/Sysmon,
-WireGuard, Telegram hoặc SSH/nftables thật. GitHub Actions được cấu hình cho Python 3.12/3.14,
-không coi là đã pass cho đến khi workflow thực sự chạy trên GitHub.
+The backend suite includes real HTTP ingestion and a separate worker process
+with disposable SQLite databases, additive legacy migration, durable job
+ownership/retry, replay cutoff, permissions, CSRF, privacy guards and response
+intent recovery. The browser suite covers empty data, the synthetic Wazuh
+pipeline, ledger, analyst notes, dry-run review, mobile navigation, keyboard
+focus and session cookie isolation.
 
-Số liệu mock xác nhận luồng phần mềm, không xác nhận precision/recall hoặc hiệu quả bảo mật.
+The skipped test requires the explicit `--live-provider` option and may make a
+paid provider request. It was not enabled. One Starlette TestClient deprecation
+warning remains in the backend suite.
+
+Docker CLI is unavailable on this machine: image build and Compose startup were
+not run. Compose/workflow YAML and shell syntax were checked statically only.
+No real Wazuh/VPS/WireGuard/firewall, Telegram, SSH response or paid LLM
+integration was exercised. No RAM, throughput, detection accuracy or model cost
+benchmark is claimed. No GitHub push or deployment was performed.
+
+Reproduction commands and prerequisites are in [README](../README.md).

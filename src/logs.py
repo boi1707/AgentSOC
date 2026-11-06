@@ -23,6 +23,7 @@ class JsonFormatter(logging.Formatter):
                 settings.llm_key,
                 settings.tg_token,
                 settings.tg_chat,
+                settings.admin_password,
             )
             if v
         )
@@ -70,7 +71,11 @@ def configure_logging(settings):
     for handler in (
         logging.StreamHandler(sys.stdout),
         RotatingFileHandler(
-            folder / "agentsoc.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+            folder
+            / ("agentsoc-" + settings.log_component + ".log" if settings.log_component else "agentsoc.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
         ),
     ):
         handler.setFormatter(formatter)

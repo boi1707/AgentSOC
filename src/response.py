@@ -6,6 +6,8 @@ from .anon import Anon
 
 def candidate(case, settings):
     verdict = case["verdict"]
+    if settings.response_mode == "ssh" and (case.get("synthetic") or settings.demo):
+        raise ValueError("Synthetic evidence cannot execute SSH blocking")
     # Switching the service to live must not make old mock cases actionable.
     if settings.response_mode == "ssh" and verdict.get("mode") != "live":
         raise ValueError("Only live analysis cases can execute SSH blocking")

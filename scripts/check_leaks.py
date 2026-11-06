@@ -11,7 +11,7 @@ from src.settings import Settings
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default="data/agentsoc.db")
+    parser.add_argument("--db", default=Settings.from_env().db)
     args = parser.parse_args()
     try:
         _, _, ledger = read_database(args.db)

@@ -132,7 +132,8 @@ def test_restart_queue_and_ledger(settings):
     assert len(cases) == 1 and cases[0]["verdict"]["verdict"] == "attack"
     with restarted.store.connect() as db:
         ledger = db.execute("SELECT * FROM ledger").fetchall()
-    assert len(ledger) == 3
+    assert len(ledger) == 6
+    assert sum(r["agent"] == "tool" for r in ledger) == 3
     for row in ledger:
         assert row["mode"] == "mock" and not row["error"]
         assert "192.168." not in row["prompt"] and "vana" not in row["prompt"]
@@ -171,6 +172,15 @@ def test_live_schema_failure_is_audited(settings):
         LLM(settings, store, post=post).ask(Anon(), "c1", "net", "JSON", [], [])
     with store.connect() as db:
         assert db.execute("SELECT error FROM ledger").fetchone()[0] == "ValidationError"
+
+
+def test_runtime_secrets_are_masked_even_without_a_vendor_key_pattern(settings):
+    secret = settings.ingest_key
+    store = Store(settings.db)
+    LLM(settings, store).ask(Anon(), "guarded", "net", "JSON", [{"id": "1", "description": secret}], ["1"])
+    with store.connect() as db:
+        prompt = db.execute("SELECT prompt FROM ledger").fetchone()[0]
+    assert secret not in prompt and "SECRET_" in prompt
 
 
 @pytest.mark.parametrize("confidence,ids", [(0.5, ["n1"]), (0.99, ["invented"]), (0.99, ["n1", "invented"])])

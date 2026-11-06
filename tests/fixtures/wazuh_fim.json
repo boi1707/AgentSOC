@@ -1,0 +1,1 @@
+{"id":"fixture-fim","timestamp":"2026-11-06T08:00:00+00:00","rule":{"id":"550","level":7,"description":"Synthetic file integrity change","groups":["syscheck"]},"syscheck":{"path":"/etc/ssh/sshd_config","event":"modified"},"full_log":"Synthetic fixture without host/IP identity"}

@@ -42,7 +42,7 @@ def report(path, *, labels=None, include_mock=False, input_price=None, output_pr
         for c in cases
         if c["status"] != "queued" and (include_mock or json.loads(c["verdict"]).get("mode") == "live")
     }
-    calls = [c for c in ledger if c["case_id"] in selected]
+    calls = [c for c in ledger if c["case_id"] in selected and c["agent"] in {"net", "host", "judge"}]
     usage = [json.loads(c["usage"]) for c in calls if c["error"] != "Blocked"]
     measured = bool(usage) and all({"prompt_tokens", "completion_tokens"} <= u.keys() for u in usage)
     input_tokens = sum(u["prompt_tokens"] for u in usage) if measured else None

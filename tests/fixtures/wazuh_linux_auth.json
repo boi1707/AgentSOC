@@ -1,0 +1,1 @@
+{"id":"fixture-linux-auth","timestamp":"2026-11-06T08:00:00+00:00","agent":{"id":"002","name":"linux-fixture","ip":"10.8.0.4"},"rule":{"id":"5710","level":8,"description":"Synthetic SSH authentication failure","groups":["sshd","authentication_failed"]},"data":{"srcip":"192.168.20.50","dstuser":"fixture-user"},"full_log":"Synthetic fixture only"}

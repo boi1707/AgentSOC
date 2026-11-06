@@ -11,7 +11,7 @@ from src.settings import Settings
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default="data/agentsoc.db")
+    parser.add_argument("--db", default=Settings.from_env().db)
     parser.add_argument("--ground-truth", help="CSV with alert_id,label (attack or benign)")
     parser.add_argument("--include-mock", action="store_true", help="Include simulated cases, explicitly")
     parser.add_argument("--input-usd-per-million", type=float)

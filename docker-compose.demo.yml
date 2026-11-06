@@ -1,0 +1,37 @@
+name: agentsoc-demo
+services:
+  api:
+    build: .
+    env_file: .env
+    environment: &demo
+      DEMO_MODE: "1"
+      DEMO_DB: data/demo/agentsoc.db
+      EMBEDDED_WORKER: "0"
+      LLM_MODE: mock
+      RESPONSE_MODE: dry-run
+      TG_TOKEN: ""
+      TG_CHAT: ""
+    ports: ["127.0.0.1:8001:8000"]
+    volumes: ["demo-data:/app/data"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  worker:
+    build: .
+    command: ["python", "-m", "src.worker"]
+    env_file: .env
+    environment: *demo
+    volumes: ["demo-data:/app/data"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [api]
+    healthcheck:
+      test: ["CMD", "python", "-m", "src.worker", "--health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+volumes:
+  demo-data:

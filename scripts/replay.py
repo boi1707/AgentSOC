@@ -64,6 +64,11 @@ def main():
     if args.url:
         load_dotenv()
         key = os.environ["INGEST_KEY"]
+        if Path(args.file).resolve() == Path("datasets/demo.jsonl").resolve():
+            health = httpx.get(args.url.rstrip("/") + "/health", timeout=5)
+            health.raise_for_status()
+            if not health.json().get("demo"):
+                parser.error("Synthetic demo fixtures require a separate DEMO_MODE=1 service/database")
         for alert, delay in zip(alerts, waits):
             if delay:
                 time.sleep(delay)
@@ -85,7 +90,7 @@ def main():
         clock = now
         for alert, delay in zip(alerts, waits):
             clock += delay
-            service.store.ingest(alert, clock)
+            service.store.ingest(alert, clock, synthetic=True)
         service.tick(clock + settings.quiet)
         for case in service.store.cases():
             print(
