@@ -34,6 +34,7 @@ class LLM:
                             self.settings.llm_key,
                             self.settings.admin_password,
                             self.settings.tg_token,
+                            *self.settings.integration_secrets,
                         )
                         if v
                     ),

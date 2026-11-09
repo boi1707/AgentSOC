@@ -4,7 +4,7 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from dotenv import load_dotenv
 
@@ -42,6 +42,13 @@ class Settings:
     secure_cookie: bool = False
     lease_seconds: float = 120
     wazuh_source: str = "wazuh"
+    thehive_url: str = ""
+    thehive_key: str = ""
+    shuffle_hook: str = ""
+    vt_key: str = ""
+    vt_exclude_ips: tuple = ()
+    vt_interval: float = 16
+    vt_daily_limit: int = 500
 
     @classmethod
     def from_env(cls):
@@ -79,9 +86,62 @@ class Settings:
             secure_cookie=os.getenv("SESSION_COOKIE_SECURE", "0") == "1",
             lease_seconds=float(os.getenv("JOB_LEASE_SECONDS", "120")),
             wazuh_source=os.getenv("WAZUH_SOURCE_ID", "wazuh"),
+            thehive_url=os.getenv("THEHIVE_URL", "").rstrip("/"),
+            thehive_key=os.getenv("THEHIVE_KEY", ""),
+            shuffle_hook=os.getenv("SHUFFLE_HOOK", ""),
+            vt_key=os.getenv("VT_KEY", ""),
+            vt_exclude_ips=tuple(x.strip() for x in os.getenv("VT_EXCLUDE_IPS", "").split(",") if x.strip()),
+            vt_interval=float(os.getenv("VT_REQUEST_INTERVAL", "16")),
+            vt_daily_limit=int(os.getenv("VT_DAILY_LIMIT", "500")),
+        )
+
+    @property
+    def integration_secrets(self):
+        hook = urlsplit(self.shuffle_hook)
+        return tuple(
+            v
+            for v in (
+                self.thehive_key,
+                self.vt_key,
+                self.shuffle_hook,
+                hook.path if self.shuffle_hook and len(hook.path) > 1 else "",
+                hook.query,
+                *[v for _, v in parse_qsl(hook.query) if len(v) >= 16],
+                *[v for v in hook.path.split("/") if len(v) >= 16],
+            )
+            if v
         )
 
     def validate(self):
+        if self.shuffle_hook:
+            hook = urlsplit(self.shuffle_hook)
+            if (
+                hook.scheme not in {"http", "https"}
+                or not hook.hostname
+                or hook.username
+                or hook.password
+                or hook.fragment
+            ):
+                raise ValueError("Invalid SHUFFLE_HOOK")
+        if not math.isfinite(self.vt_interval) or self.vt_interval < 16:
+            raise ValueError("VT_REQUEST_INTERVAL must be at least 16 seconds")
+        if not 1 <= self.vt_daily_limit <= 500:
+            raise ValueError("VT_DAILY_LIMIT must be between 1 and 500")
+        for ip in self.vt_exclude_ips:
+            ipaddress.ip_address(ip)
+        if bool(self.thehive_url) != bool(self.thehive_key):
+            raise ValueError("THEHIVE_URL and THEHIVE_KEY must both be configured or both empty")
+        if self.thehive_url:
+            endpoint = urlsplit(self.thehive_url)
+            if (
+                endpoint.scheme not in {"http", "https"}
+                or not endpoint.hostname
+                or endpoint.username
+                or endpoint.password
+                or endpoint.query
+                or endpoint.fragment
+            ):
+                raise ValueError("Invalid THEHIVE_URL")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.wazuh_source):
             raise ValueError("WAZUH_SOURCE_ID must be 1..64 letters, digits, underscore or hyphen")
         if len(self.ingest_key) < 24 or len(self.approve_key) < 24:

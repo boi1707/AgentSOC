@@ -18,6 +18,7 @@ from src.api.schemas import (
     LedgerStep,
     Page,
 )
+from src.integrations import incident_integrations, integration_health
 
 router = APIRouter(prefix="/api/v1")
 
@@ -61,6 +62,7 @@ def scrub(value, settings):
             settings.admin_password,
             settings.llm_key,
             settings.tg_token,
+            *settings.integration_secrets,
         ):
             if secret:
                 value = value.replace(secret, "[REDACTED]")
@@ -324,6 +326,7 @@ def incident_detail(cid: str, request: Request):
     if not case:
         raise HTTPException(404, "Incident not found")
     result = incident_view(request, case)
+    result["integrations"] = incident_integrations(repo, cid)
     with repo.connect() as db:
         result["evidence"] = [
             dict(r)
@@ -542,6 +545,7 @@ def health_snapshot(repo, config):
     fresh = any(time.time() - w["last_seen"] < max(30, config.poll * 3) for w in workers)
     return {
         "database": "ready",
+        "integrations": integration_health(repo, config),
         "worker_fresh": fresh,
         "workers": workers,
         "backlog": backlog,

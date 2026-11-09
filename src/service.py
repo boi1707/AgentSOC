@@ -9,9 +9,12 @@ from .agents import analyze
 from .anon import Anon
 from .incident import Grouper
 from .llm import LLM
+from .shuffle import deliver_pending
 from .storage import Store
+from .thehive import sync_pending
 from .tools import ToolRequest
 from .tools import execute as execute_tool
+from .virustotal import enrich_pending
 
 log = logging.getLogger("agentsoc.service")
 
@@ -65,6 +68,21 @@ class Service:
                 self.handle(job["case_id"], job=job)
             self.store.heartbeat(self.owner)
 
+        # External I/O is outside the analysis transaction and never changes job success.
+        if not self.settings.demo:
+            for name, enabled, operation in (
+                ("virustotal", self.settings.vt_key, enrich_pending),
+                ("thehive", self.settings.thehive_url, sync_pending),
+                ("shuffle", self.settings.shuffle_hook, deliver_pending),
+            ):
+                if enabled:
+                    try:
+                        operation(self.store, self.settings)
+                    except Exception:
+                        log.warning(name + ".cycle_failed")
+                    finally:
+                        self.store.heartbeat(self.owner)
+
     def handle(self, cid, job=None):
         if job is None:
             raise ValueError("Investigation requires a claimed durable job")
@@ -77,6 +95,7 @@ class Service:
                 self.settings.llm_key,
                 self.settings.admin_password,
                 self.settings.tg_token,
+                *self.settings.integration_secrets,
             ),
         )
         self.llm.run_id, self.llm.attempt = run["id"], job["attempts"]

@@ -148,7 +148,32 @@ export interface Step {
   status: string;
   attempt: number | null;
 }
+export interface IncidentIntegrations {
+  thehive: {
+    remote_id: string | null;
+    state: string;
+    error: string | null;
+  } | null;
+  virustotal: {
+    ip: string;
+    status: string;
+    error: string | null;
+    report: {
+      status: string;
+      stats?: Record<string, number>;
+      queried_at: number;
+    } | null;
+  }[];
+  shuffle: {
+    id: string;
+    status: string;
+    attempts: number;
+    error: string | null;
+    delivered: number | null;
+  }[];
+}
 export interface IncidentDetail extends Incident {
+  integrations?: IncidentIntegrations;
   evidence: {
     id: string;
     normalized: Normalized;
@@ -172,6 +197,16 @@ export interface Metrics {
   last_alert_at: number | null;
 }
 export interface Health {
+  integrations?: Record<
+    string,
+    {
+      configured: boolean;
+      active: boolean;
+      states: Record<string, number>;
+      errors: number;
+    }
+  >;
+
   database: string;
   worker_fresh: boolean;
   workers: { id: string; last_seen: number; current_job: string | null }[];

@@ -1258,6 +1258,71 @@ function IncidentPage() {
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
+                    <h2>Case integrations</h2>
+                  </div>
+                  <div className="side-content">
+                    <label>TheHive</label>
+                    <p>
+                      {d.integrations?.thehive ? (
+                        <>
+                          <Badge value={d.integrations.thehive.state} />{" "}
+                          <span className="mono">
+                            {d.integrations.thehive.remote_id ??
+                              "No remote ID yet"}
+                          </span>
+                        </>
+                      ) : (
+                        "Not queued"
+                      )}
+                    </p>
+                    {d.integrations?.thehive?.error && (
+                      <p className="warn">{d.integrations.thehive.error}</p>
+                    )}
+                    <label>VirusTotal · public IP reputation</label>
+                    {d.integrations?.virustotal.length ? (
+                      d.integrations.virustotal.map((v) => (
+                        <div className="job" key={v.ip}>
+                          <span className="mono">{v.ip}</span>{" "}
+                          <Badge value={v.status} />
+                          {v.report?.stats && (
+                            <p>
+                              Malicious: {v.report.stats.malicious ?? 0} ·
+                              Suspicious: {v.report.stats.suspicious ?? 0}
+                            </p>
+                          )}
+                          {v.report && (
+                            <small>
+                              {v.report.status} · {stamp(v.report.queried_at)}
+                            </small>
+                          )}
+                          {v.error && <p className="warn">{v.error}</p>}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="muted small">No public IP lookup queued.</p>
+                    )}
+                    <label>Shuffle response notifications</label>
+                    {d.integrations?.shuffle.length ? (
+                      d.integrations.shuffle.map((event) => (
+                        <div className="job" key={event.id}>
+                          <Badge value={event.status} />{" "}
+                          <span>Attempts: {event.attempts}</span>
+                          {event.error && <p className="warn">{event.error}</p>}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="muted small">
+                        No approved response event queued.
+                      </p>
+                    )}
+                    <p className="muted small">
+                      Delivery status does not authorize or verify blocking. See
+                      Response history for the action result.
+                    </p>
+                  </div>
+                </section>
+                <section className="panel">
+                  <div className="panel-heading">
                     <h2>Job state</h2>
                   </div>
                   <div className="side-content">
@@ -1723,6 +1788,47 @@ function SystemPage() {
                     {d.demo ? "Synthetic demo database" : "Production database"}
                   </dd>
                 </dl>
+              </section>
+              <section className="panel">
+                <div className="panel-heading">
+                  <h2>External integrations</h2>
+                </div>
+                <div className="side-content">
+                  {Object.entries(d.integrations ?? {}).map(
+                    ([name, integration]) => (
+                      <div className="job" key={name}>
+                        <strong>
+                          {name === "virustotal"
+                            ? "VirusTotal"
+                            : name === "thehive"
+                              ? "TheHive"
+                              : "Shuffle"}
+                        </strong>
+                        <p>
+                          {integration.active
+                            ? "Enabled"
+                            : integration.configured
+                              ? "Disabled in demo"
+                              : "Not configured"}
+                        </p>
+                        <p className="muted small">
+                          {Object.entries(integration.states)
+                            .map(([state, count]) => state + ": " + count)
+                            .join(" · ") || "No queued work"}
+                        </p>
+                        {integration.errors > 0 && (
+                          <p className="warn">
+                            {integration.errors} entries need retry or review
+                          </p>
+                        )}
+                      </div>
+                    ),
+                  )}
+                  <p className="muted small">
+                    Configuration and queue state only; external reachability is
+                    not actively probed.
+                  </p>
+                </div>
               </section>
               <section className="panel">
                 <div className="panel-heading">
