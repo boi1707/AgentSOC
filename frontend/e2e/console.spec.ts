@@ -50,6 +50,9 @@ test("empty state, Wazuh pipeline, ledger, analyst note and dry-run review", asy
   await expect(
     page.getByRole("heading", { name: "Decision summary" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Case integrations", exact: true }),
+  ).toBeVisible();
   await page
     .getByLabel("Add operational context")
     .fill("Browser smoke verified the cited evidence.");
@@ -121,6 +124,9 @@ test("mobile navigation, keyboard focus and session cookie isolation", async ({
     .click();
   await expect(
     page.getByRole("heading", { name: "System health", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "External integrations", exact: true }),
   ).toBeVisible();
   await expect
     .poll(() =>

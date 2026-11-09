@@ -7,6 +7,22 @@ FastAPI và worker riêng, dùng SQLite; không mang một hệ microservices n�
 Mặc định **không seed dữ liệu**, `LLM_MODE=mock`, `RESPONSE_MODE=dry-run`. Mock được gắn nhãn,
 không phải đánh giá an ninh thật. Không tự tải model, sửa Wazuh/VPN/firewall hay triển khai VPS.
 
+## TheHive, Shuffle và VirusTotal
+
+Đã có các tích hợp tùy chọn, mặc định tắt:
+
+- **TheHive:** hàng đợi case bền vững, lưu remote ID, cập nhật verdict/reputation và kết quả response.
+- **VirusTotal:** chỉ tra tối đa ba IP công cộng mỗi incident, cache 24 giờ, quota dùng chung trong SQLite.
+- **Shuffle:** webhook sau Approve có kết quả; outbox/retry và event ID cố định, không tự thực thi chặn IP.
+
+Approve vẫn ở AgentSOC. Chế độ demo không gọi các dịch vụ ngoài. Trang incident và System health
+hiển thị trạng thái queue/kết quả; cấu hình không đồng nghĩa kết nối đã được xác minh.
+Xem [hướng dẫn tích hợp và triển khai](docs/integrations.vi.md), [.env.example](.env.example)
+và [chi tiết TheHive](docs/thehive.md). Không đưa key thật hoặc URL webhook vào Git.
+
+Kết quả kiểm tra patch và giới hạn build/browser local được ghi riêng trong
+[validation-integrations.md](docs/validation-integrations.md); chưa xác minh tích hợp trên VPS.
+
 ## Giao diện
 
 Ảnh chụp từ ứng dụng chạy local với database demo cách ly: dữ liệu synthetic được gửi qua
@@ -56,6 +72,12 @@ npm run dev
 ```
 
 Vite proxy API cùng origin; không bật CORS wildcard. Production static build được FastAPI phục vụ.
+
+Console dùng CSS riêng và compiler JavaScript của Tailwind, không cần scanner native Oxide.
+Các utility Tailwind được khai báo rõ bằng `@source inline(...)` trong `frontend/src/style.css`;
+khi thêm utility mới, cập nhật danh sách này. Build sẽ báo lỗi nếu bật lại auto-scan hoặc thêm
+nguồn scan ngoài. Cách này giúp build trên Windows có Application Control mà không đổi chính
+sách bảo mật; `npm run build` vẫn là lệnh build chuẩn.
 
 ## Demo cách ly
 

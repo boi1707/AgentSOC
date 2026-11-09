@@ -6,6 +6,20 @@ import time
 from .adapters.wazuh import normalize
 
 SQL = """
+CREATE TABLE IF NOT EXISTS shuffle_outbox(id TEXT PRIMARY KEY,action_id INTEGER NOT NULL UNIQUE,case_id TEXT NOT NULL,
+ payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
+ available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT,delivered REAL);
+CREATE TABLE IF NOT EXISTS vt_jobs(case_id TEXT NOT NULL,ip TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
+ available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT,report TEXT,
+ PRIMARY KEY(case_id,ip));
+CREATE TABLE IF NOT EXISTS vt_cache(ip TEXT PRIMARY KEY,report TEXT NOT NULL,expires REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS vt_budget(id INTEGER PRIMARY KEY CHECK(id=1),day TEXT NOT NULL,count INTEGER NOT NULL,next_at REAL NOT NULL);
+
+CREATE TABLE IF NOT EXISTS thehive_sync(case_id TEXT PRIMARY KEY,remote_id TEXT,payload_hash TEXT,
+ state TEXT NOT NULL DEFAULT 'pending',available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT);
+CREATE INDEX IF NOT EXISTS thehive_due ON thehive_sync(available,lease_until);
+CREATE INDEX IF NOT EXISTS shuffle_due ON shuffle_outbox(status,available,lease_until);
+CREATE INDEX IF NOT EXISTS vt_due ON vt_jobs(status,available,lease_until);
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS incident_alerts(case_id TEXT NOT NULL,alert_id TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(case_id,alert_id));
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,case_id TEXT NOT NULL,created REAL NOT NULL,finished REAL,status TEXT NOT NULL,

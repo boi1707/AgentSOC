@@ -1,4 +1,5 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source inline("relative truncate filter");
 @theme {
   --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
 }

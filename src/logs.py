@@ -11,6 +11,32 @@ from pathlib import Path
 from .anon import Anon
 
 
+class CredentialFilter(logging.Filter):
+    """Keep credential-bearing webhook URLs out of third-party HTTP logs too."""
+
+    def __init__(self, settings):
+        super().__init__()
+        self.secrets = tuple(
+            v
+            for v in (
+                settings.ingest_key,
+                settings.approve_key,
+                settings.llm_key,
+                settings.tg_token,
+                settings.admin_password,
+                *settings.integration_secrets,
+            )
+            if v
+        )
+
+    def filter(self, record):
+        text = record.getMessage()
+        for value in self.secrets:
+            text = text.replace(value, "[REDACTED]")
+        record.msg, record.args = text, ()
+        return True
+
+
 class JsonFormatter(logging.Formatter):
     def __init__(self, settings):
         super().__init__()
@@ -22,6 +48,7 @@ class JsonFormatter(logging.Formatter):
                 settings.approve_key,
                 settings.llm_key,
                 settings.tg_token,
+                *settings.integration_secrets,
                 settings.tg_chat,
                 settings.admin_password,
             )
@@ -59,6 +86,12 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(settings):
+    for name in ("httpx", "httpcore", "httpcore.connection", "httpcore.http11", "httpcore.http2"):
+        external = logging.getLogger(name)
+        for item in external.filters[:]:
+            if isinstance(item, CredentialFilter):
+                external.removeFilter(item)
+        external.addFilter(CredentialFilter(settings))
     logger = logging.getLogger("agentsoc")
     logger.setLevel(settings.log_level)
     logger.propagate = False

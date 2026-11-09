@@ -64,6 +64,7 @@ class IncidentSummary(BaseModel):
 
 
 class IncidentDetail(IncidentSummary):
+    integrations: dict[str, Any] = Field(default_factory=dict)
     evidence: list[dict[str, Any]]
     runs: list[dict[str, Any]]
     notes: list[dict[str, Any]]

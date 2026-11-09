@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .adapters.wazuh import normalize
 from .migrations import migrate
+from .virustotal import public_ips
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY, received REAL NOT NULL, alert TEXT NOT NULL,
@@ -182,10 +183,48 @@ class Store:
                     "INSERT INTO actions(ts,case_id,action,ip,mode,result,actor,completed_at) VALUES(?,?,?,?,?,?,?,?)",
                     (time.time(), cid, action, ip, mode, status, actor, time.time()),
                 )
+            if action == "approve":
+                completed = db.execute(
+                    "SELECT * FROM actions WHERE case_id=? AND action='approve' AND result=? ORDER BY id DESC LIMIT 1",
+                    (cid, status),
+                ).fetchone()
+                self.queue_response(db, completed)
+            db.execute("UPDATE thehive_sync SET available=0 WHERE case_id=?", (cid,))
             self.audit(actor, "response." + action, cid, status, db=db)
+
+    @staticmethod
+    def queue_response(db, action):
+        case = db.execute("SELECT synthetic FROM cases WHERE id=?", (action["case_id"],)).fetchone()
+        if not case or case["synthetic"]:
+            return
+        event_id = uuid.uuid4().hex
+        event = {
+            "schema_version": 1,
+            "event_id": event_id,
+            "event": "response.completed",
+            "case_id": action["case_id"],
+            "action_id": action["id"],
+            "decision": "approve",
+            "ip": action["ip"],
+            "status": action["result"],
+            "mode": action["mode"],
+            "blocked": action["result"] == "blocked" and action["mode"] == "ssh",
+            "verification_status": "not_verified",
+            "completed_at": action["completed_at"],
+        }
+        db.execute(
+            "INSERT OR IGNORE INTO shuffle_outbox(id,action_id,case_id,payload) VALUES(?,?,?,?)",
+            (event_id, action["id"], action["case_id"], json.dumps(event)),
+        )
 
     def recover(self, *, stale_only=False):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            recovering = db.execute(
+                "SELECT id FROM actions WHERE action='approve' AND result='executing'"
+                + (" AND (lease_until IS NULL OR lease_until<?)" if stale_only else ""),
+                (time.time(),) if stale_only else (),
+            ).fetchall()
             if stale_only:
                 db.execute(
                     "UPDATE cases SET status='action_unknown' WHERE status='executing' AND (id IN (SELECT case_id FROM actions WHERE result='executing' AND (lease_until IS NULL OR lease_until<?)) OR NOT EXISTS(SELECT 1 FROM actions a WHERE a.case_id=cases.id AND a.result='executing'))",
@@ -198,6 +237,11 @@ class Store:
             else:
                 db.execute("UPDATE cases SET status='action_unknown' WHERE status='executing'")
                 db.execute("UPDATE actions SET result='action_unknown' WHERE result='executing'")
+            for row in recovering:
+                action = db.execute("SELECT * FROM actions WHERE id=?", (row["id"],)).fetchone()
+                if action["result"] == "action_unknown":
+                    self.queue_response(db, action)
+                    db.execute("UPDATE thehive_sync SET available=0 WHERE case_id=?", (action["case_id"],))
 
     def metrics(self):
         with self.connect() as db:
@@ -338,6 +382,15 @@ class Store:
                     (now + lease, job, owner),
                 )
 
+    @staticmethod
+    def queue_integrations(db, cid):
+        row = db.execute("SELECT incident,synthetic FROM cases WHERE id=?", (cid,)).fetchone()
+        if not row or row["synthetic"]:
+            return
+        db.execute("INSERT OR IGNORE INTO thehive_sync(case_id) VALUES(?)", (cid,))
+        for ip in public_ips(json.loads(row["incident"]).get("ips", [])):
+            db.execute("INSERT OR IGNORE INTO vt_jobs(case_id,ip) VALUES(?,?)", (cid, ip))
+
     def complete_job(self, job, verdict, restore):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -355,6 +408,7 @@ class Store:
                 "UPDATE jobs SET status='completed',lease_until=NULL,error=NULL WHERE id=?", (job["id"],)
             )
             if not run["replay"]:
+                Store.queue_integrations(db, job["case_id"])
                 db.execute(
                     "UPDATE cases SET status='pending',workflow_status='review',verdict=?,restore=? WHERE id=?",
                     (json.dumps(verdict), json.dumps(restore), job["case_id"]),
@@ -391,6 +445,7 @@ class Store:
         )
         run = db.execute("SELECT replay,mode FROM runs WHERE id=?", (job["run_id"],)).fetchone()
         if not run["replay"]:
+            Store.queue_integrations(db, job["case_id"])
             verdict = {
                 "verdict": "review",
                 "confidence": 0,
