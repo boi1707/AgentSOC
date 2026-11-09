@@ -53,6 +53,7 @@ test("empty state, Wazuh pipeline, ledger, analyst note and dry-run review", asy
   await expect(
     page.getByRole("heading", { name: "Case integrations", exact: true }),
   ).toBeVisible();
+  await page.screenshot({ path: "test-results/incident.png", fullPage: true });
   await page
     .getByLabel("Add operational context")
     .fill("Browser smoke verified the cited evidence.");
