@@ -181,7 +181,7 @@ không gửi Telegram, chạy SSH thật hoặc tiêu tiền cloud API. Live int
 - [Phạm vi nghiệm thu](docs/IMPLEMENTATION.md)
 - [Kết quả kiểm thử local và các mục chưa xác minh](docs/VALIDATION.md)
 
-Chưa đo RAM/CPU/throughput trên VPS đang chạy Wazuh, độ chính xác bằng nhãn thật hay chi phí model
+Chưa đo RAM/CPU/throughput được trên VPS đang chạy Wazuh, độ chính xác bằng nhãn thật hay chi phí model
 thật. Không dùng số mock làm số liệu đồ án. SQLite hiện dành cho một workspace; chưa SSO,
 multi-tenant hoặc audit chống sửa. Shuffle có durable notification outbox; Telegram trực tiếp chưa
 có spool/retry. Docker và kết nối VPS/Wazuh/LLM/
