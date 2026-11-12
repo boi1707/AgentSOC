@@ -11,7 +11,7 @@
 
 Ứng dụng SOC self-hosted cho chuyên viên vận hành: **Wazuh → inbox bền vững → correlation →
 Net/Host/Judge → investigation ledger → human review**. Console React/TypeScript/Tailwind,
-FastAPI và worker riêng, dùng SQLite; không mang một hệ microservices nặng sang VPS.
+FastAPI và worker riêng,dùng SQLite; không mang một hệ microservices nặng sang VPS.
 
 Mặc định **không seed dữ liệu**, `LLM_MODE=mock`, `RESPONSE_MODE=dry-run`. Mock được gắn nhãn,
 không phải đánh giá an ninh thật. Không tự tải model, sửa Wazuh/VPN/firewall hay triển khai VPS.
