@@ -28,6 +28,11 @@ def test_real_http_pipeline_and_review(tmp_path):
         "POLL_SECONDS": "0.05",
         "TG_TOKEN": "",
         "TG_CHAT": "",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "THEHIVE_URL": "",
+        "THEHIVE_KEY": "",
+        "SHUFFLE_HOOK": "",
+        "VT_KEY": "",
         "EMBEDDED_WORKER": "0",
     }
     process = subprocess.Popen(

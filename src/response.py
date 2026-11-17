@@ -41,7 +41,13 @@ def candidate(case, settings):
 
 def execute(ip, settings):
     if settings.response_mode == "dry-run":
-        return "dry_run"
+        import time
+
+        from .response_adapters import BlockPlan, DryRunAdapter
+
+        return DryRunAdapter().block(BlockPlan("", ip, time.time() + 86400, settings.protected))
+    if settings.response_mode != "ssh":
+        raise ValueError("Unsupported response adapter")
     process = subprocess.run(
         [
             "ssh",

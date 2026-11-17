@@ -166,7 +166,7 @@ class Service:
                 self.settings.confidence,
                 context,
             )
-            if self.store.complete_job(job, verdict, anon.rev):
+            if self.store.complete_job(job, verdict, anon.rev, settings=self.settings):
                 log.info(
                     "case.created",
                     extra={
@@ -194,6 +194,18 @@ class Service:
             self.llm.run_id = None
 
     def notify(self, cid, verdict):
+        if self.settings.shuffle_hook and self.settings.telegram_notify_chats:
+            from .notifications import proposal_event
+
+            case = self.store.get(cid)
+            if case and not case["synthetic"]:
+                event = proposal_event(self.store, self.settings, case)
+                with self.store.connect() as db:
+                    db.execute(
+                        "INSERT OR IGNORE INTO notification_outbox(id,case_id,payload) VALUES(?,?,?)",
+                        (event["event_id"], cid, json.dumps(event)),
+                    )
+            return
         if self.settings.tg_token and self.settings.tg_chat:
             try:
                 httpx.post(
@@ -206,4 +218,4 @@ class Service:
                 ).raise_for_status()
                 log.info("telegram.sent", extra={"case_id": cid})
             except Exception:
-                log.exception("telegram.failed", extra={"case_id": cid})
+                log.warning("telegram.failed", extra={"case_id": cid})

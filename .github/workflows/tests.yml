@@ -10,51 +10,54 @@ jobs:
         python: ['3.12', '3.14']
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements-dev.lock
-      - run: python -m ruff check src scripts tests
-      - run: python -m ruff format --check src scripts tests
+      - run: python -m ruff check src scripts tests integrations
+      - run: python -m ruff format --check src scripts tests integrations
       - run: python -m pytest -q
       - run: python -m scripts.replay
       - run: bash -n scripts/setup.sh scripts/send_test_alert.sh scripts/check_leaks.sh
   container:
+    name: Isolated Python 3.12 image and rollback gate
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          python - <<'PY'
-          import secrets
-          from pathlib import Path
-          template = Path('.env.example').read_text()
-          template = template.replace('INGEST_KEY=\n', 'INGEST_KEY=' + secrets.token_urlsafe(32) + '\n')
-          template = template.replace('APPROVE_KEY=\n', 'APPROVE_KEY=' + secrets.token_urlsafe(32) + '\n')
-          Path('.env').write_text(template)
-          PY
-          mkdir -p data
-          sudo chown 10001:10001 data
-      - run: docker compose config --quiet
-      - run: docker compose up -d --build --wait --wait-timeout 120
-      - run: make health
-      - run: docker compose exec -T agentsoc-backend python -c "import sqlite3; assert sqlite3.connect('data/agentsoc.db').execute('select count(*) from inbox').fetchone()[0] == 0"
-      - run: docker compose down
-      - run: make demo && make replay
-      - run: |
-          for attempt in $(seq 1 30); do
-            if docker compose -f docker-compose.demo.yml exec -T api python -c "import sqlite3; db=sqlite3.connect('data/demo/agentsoc.db'); assert db.execute(\"select count(*) from cases where status='pending'\").fetchone()[0] == 1; assert db.execute(\"select count(*) from ledger where agent in ('net','host','judge')\").fetchone()[0] == 3; assert db.execute('select count(*) from inbox where synthetic=1').fetchone()[0] == 2"; then break; fi
-            if [ "$attempt" -eq 30 ]; then exit 1; fi
-            sleep 1
-          done
-          docker compose -f docker-compose.demo.yml exec -T api python -m scripts.check_leaks
-      - if: failure()
-        run: docker compose logs --tail=100
-      - if: always()
-        run: docker compose down && docker compose -f docker-compose.demo.yml down
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.lock
+      - name: Build one versioned image for backend and worker
+        run: docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "agentsoc:ci-$GITHUB_SHA" .
+      - name: Build historical rollback image from committed baseline only
+        run: |
+          mkdir -p "$RUNNER_TEMP/agentsoc-previous"
+          git archive 0022d28 | tar -x -C "$RUNNER_TEMP/agentsoc-previous"
+          docker build -t agentsoc:rollback-0022d28 "$RUNNER_TEMP/agentsoc-previous"
+      - name: Validate isolated runtime, dry-run, migration and image rollback
+        run: >-
+          python -m scripts.validate_docker
+          --image "agentsoc:ci-$GITHUB_SHA"
+          --previous-image agentsoc:rollback-0022d28
+          --report "$RUNNER_TEMP/agentsoc-docker-validation.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-validation-result
+          path: ${{ runner.temp }}/agentsoc-docker-validation.json
+          if-no-files-found: warn
   console:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

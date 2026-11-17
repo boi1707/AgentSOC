@@ -10,6 +10,14 @@ from pathlib import Path
 def main():
     with tempfile.TemporaryDirectory(prefix="agentsoc-browser-") as folder:
         os.environ.update(
+            PYTHON_DOTENV_DISABLED="1",
+            THEHIVE_URL="",
+            THEHIVE_KEY="",
+            SHUFFLE_HOOK="",
+            SHUFFLE_CALLBACK_SECRET="",
+            TELEGRAM_USERS="{}",
+            TELEGRAM_NOTIFY_CHATS="",
+            VT_KEY="",
             INGEST_KEY="e2e-ingest-fixture-not-a-live-secret",
             APPROVE_KEY="e2e-review-fixture-not-a-live-secret",
             ADMIN_USERNAME="admin",

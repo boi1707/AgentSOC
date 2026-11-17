@@ -5,25 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from src.anon import Anon
-from src.api.main import create_app
 from src.service import Service
 from src.storage import SCHEMA, Store
 from src.tools import ToolRequest, execute
 from tests.conftest import snort, windows
-
-
-@pytest.fixture
-def console(settings):
-    with TestClient(create_app(settings, worker=False)) as client:
-        result = client.post(
-            "/api/v1/auth/login", json={"username": "admin", "password": settings.approve_key}
-        )
-        assert result.status_code == 200
-        client.headers["X-CSRF-Token"] = result.json()["csrf"]
-        yield client
 
 
 def incident(client):

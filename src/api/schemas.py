@@ -59,6 +59,7 @@ class IncidentSummary(BaseModel):
     severity: str
     incident: dict[str, Any]
     verdict: dict[str, Any]
+    proposal: dict[str, Any] = Field(default_factory=dict)
     can_approve: bool
     target: str | None
 

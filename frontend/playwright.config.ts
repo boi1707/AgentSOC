@@ -3,11 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const python = path.join(
-  root,
-  ".venv",
-  process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
-);
+const python =
+  process.env.AGENTSOC_TEST_PYTHON ||
+  path.join(
+    root,
+    ".venv",
+    process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
+  );
 const chrome = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 export default defineConfig({
   testDir: "./e2e",

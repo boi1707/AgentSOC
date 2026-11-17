@@ -1,6 +1,5 @@
 import json
 import secrets
-import subprocess
 import time
 from typing import Literal
 
@@ -248,10 +247,13 @@ def incident_view(request, case):
         return value
 
     result["verdict"] = restore(result["verdict"])
+    from src.approvals import proposal
+
+    result["proposal"] = proposal(store(request), request.app.state.settings, case)
     result["can_approve"] = False
     try:
         result["target"] = response.candidate(case, request.app.state.settings)
-        result["can_approve"] = case["status"] == "pending" and case["workflow_status"] != "closed"
+        result["can_approve"] = result["proposal"]["eligible"]
     except ValueError:
         result["target"] = None
     return result
@@ -469,34 +471,11 @@ def ledger_detail(step_id: int, request: Request):
 
 @router.post("/incidents/{cid}/response")
 def review(cid: str, payload: Review, request: Request, actor=Depends(auth.require("approver"))):
-    repo, config = store(request), request.app.state.settings
-    case = repo.get(cid)
-    if not case:
-        raise HTTPException(404, "Incident not found")
-    if case["latest_run_id"] and payload.run_id != case["latest_run_id"]:
-        raise HTTPException(400, "Response must reference the current non-replay proposal run")
-    if payload.run_id:
-        run = repo.get_run(payload.run_id)
-        if not run or run["case_id"] != cid or run["replay"] or run["id"] != case["latest_run_id"]:
-            raise HTTPException(400, "Replay or stale run cannot execute a response")
-    if case["status"] != "pending":
-        raise HTTPException(409, "Case is no longer pending")
-    ip = None
-    if payload.decision == "approve":
-        try:
-            ip = response.candidate(case, config)
-        except ValueError:
-            raise HTTPException(400, "Case is not eligible under server response policy") from None
-    if not repo.claim(cid, actor=actor.username, mode=config.response_mode, action=payload.decision, ip=ip):
-        raise HTTPException(409, "Case is no longer pending")
-    status = "rejected"
-    if payload.decision == "approve":
-        try:
-            status = response.execute(ip, config)
-        except (OSError, TimeoutError, subprocess.TimeoutExpired):
-            status = "action_unknown"
-    repo.record_action(cid, payload.decision, ip, config.response_mode, status, actor.username)
-    return {"status": status, "verification_status": "not_verified", "mode": config.response_mode}
+    from src.approvals import decide
+
+    return decide(
+        store(request), request.app.state.settings, cid, payload.decision, payload.run_id, actor.username
+    )
 
 
 @router.get("/audit", dependencies=[Depends(auth.principal)], response_model=Page[AuditEvent])

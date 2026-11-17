@@ -40,3 +40,18 @@ def windows(aid="h1", level=12):
             }
         },
     }
+
+
+@pytest.fixture
+def console(settings):
+    from fastapi.testclient import TestClient
+
+    from src.api.main import create_app
+
+    with TestClient(create_app(settings, worker=False)) as client:
+        result = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": settings.approve_key}
+        )
+        assert result.status_code == 200
+        client.headers["X-CSRF-Token"] = result.json()["csrf"]
+        yield client

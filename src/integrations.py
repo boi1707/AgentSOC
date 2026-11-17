@@ -12,8 +12,9 @@ def incident_integrations(store, cid):
             "SELECT ip,status,error,report FROM vt_jobs WHERE case_id=? ORDER BY ip", (cid,)
         ).fetchall()
         events = db.execute(
-            "SELECT id,status,attempts,error,delivered FROM shuffle_outbox WHERE case_id=? ORDER BY rowid DESC",
-            (cid,),
+            "SELECT id,status,attempts,error,delivered FROM shuffle_outbox WHERE case_id=? "
+            "UNION ALL SELECT id,status,attempts,error,delivered FROM notification_outbox WHERE case_id=?",
+            (cid, cid),
         ).fetchall()
     return {
         "thehive": dict(hive) if hive else None,
@@ -30,6 +31,7 @@ def integration_health(store, settings):
         for name, table, column, enabled in (
             ("thehive", "thehive_sync", "state", bool(settings.thehive_url and settings.thehive_key)),
             ("shuffle", "shuffle_outbox", "status", bool(settings.shuffle_hook)),
+            ("proposal_notifications", "notification_outbox", "status", bool(settings.shuffle_hook)),
             ("virustotal", "vt_jobs", "status", bool(settings.vt_key)),
         ):
             counts = dict(db.execute(f"SELECT {column},count(*) FROM {table} GROUP BY {column}"))

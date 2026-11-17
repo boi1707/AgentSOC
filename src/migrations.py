@@ -6,6 +6,10 @@ import time
 from .adapters.wazuh import normalize
 
 SQL = """
+CREATE TABLE IF NOT EXISTS callback_receipts(id TEXT PRIMARY KEY,created REAL NOT NULL,digest TEXT NOT NULL,result TEXT);
+CREATE TABLE IF NOT EXISTS notification_outbox(id TEXT PRIMARY KEY,case_id TEXT NOT NULL,
+ payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
+ available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT,delivered REAL);
 CREATE TABLE IF NOT EXISTS shuffle_outbox(id TEXT PRIMARY KEY,action_id INTEGER NOT NULL UNIQUE,case_id TEXT NOT NULL,
  payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
  available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT,delivered REAL);
@@ -39,6 +43,15 @@ CREATE TABLE IF NOT EXISTS steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,role T
 
 
 def migrate(db, *, host_ips=None):
+    try:
+        _apply(db, host_ips=host_ips)
+    except BaseException:
+        # Standalone callers receive the same rollback guarantee as Store.connect callers.
+        db.rollback()
+        raise
+
+
+def _apply(db, *, host_ips=None):
     # executescript starts its own transaction; keep extension DDL and data upgrades together.
     db.executescript("BEGIN IMMEDIATE;\n" + SQL)
     additions = {
@@ -126,4 +139,5 @@ def migrate(db, *, host_ips=None):
                 (row["id"], aid, "legacy correlation; original rationale unavailable"),
             )
     db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (time.time(),))
+    db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (time.time(),))
     db.commit()
