@@ -6,8 +6,8 @@ credentials/data were used for validation. No VPS, live bot/workflow, firewall o
 
 **READY FOR GITHUB PR REVIEW: YES** — source and local checks are ready for review; CI remains a gate.
 
-**READY FOR VPS DRY-RUN DEPLOYMENT: NO** — Python 3.12 container/rollback CI must execute and pass,
-and the actual VPS images/configuration must be inventoried and checked first.
+**READY FOR VPS DRY-RUN DEPLOYMENT: NO** — Python 3.12 container/rollback CI now passes, but the
+actual VPS images/configuration and real Shuffle/Telegram lab integration still require validation.
 
 **READY FOR LIVE BLOCKING: NO** — SSH/pfSense mitigation remains unauthorized and disabled for this release.
 
@@ -30,10 +30,10 @@ requires the actual VPS, Shuffle, Telegram or integrations. A mocked result is n
 | SQL failure / abrupt migration interruption | PASS | Injected failure rolls back DDL/data; subprocess exit before commit recovers original schema/data and can retry |
 | WAL-aware backup / disposable restore | PASS | SQLite online backup includes committed WAL state and excludes an in-flight transaction; backup restores into a separate database |
 | Previous application source with migrated schema | PASS | Historical `0022d28` backend and worker service run against a migrated copy; incidents/runs/evidence/actions/outbox preserved |
-| Docker image builds and Python 3.12 interpreter | PASS | Initial Ubuntu run `44098787194` built both images and passed the interpreter assertion |
-| Docker runtime gate | FAIL | Initial run `44098787194` failed at host port discovery; corrected container-local validation awaits a new CI run |
-| Backend/Worker container health | NOT RUN | Initial run stopped before health/API validation; no health success claimed |
-| Previous **image** with migrated database copy | NOT RUN | CI builds the historical image and checks its service/backend against a copy; distinct from the source-level PASS above |
+| Docker image builds and Python 3.12 interpreter | PASS | Ubuntu run `44100801008`, code `124ac43`; artifact confirms Python 3.12.16 and matching source revision |
+| Docker runtime gate | PASS | Run `44100801008`: all 13 stages passed after replacing host port discovery with container-local HTTP |
+| Backend/Worker container health | PASS | Both actual Docker health states reached healthy; worker health command and `/live`, `/health`, `/ready` passed |
+| Previous **image** with migrated database copy | PASS | Actual historical image `0022d28` service and backend ran against a migrated backup copy; actual VPS image versions remain a separate lab gate |
 | Proactive two-chat delivery, inline callbacks and final result delivery | MOCKED | Real local API/storage with mocked Shuffle/Telegram HTTP and a persistent disposable delivery ledger; one logical result sent separately to each chat |
 | Callback auth, idempotency, races, policy and audit | MOCKED | Fifteen workflow/security test cases described below; no live messages/firewall calls |
 | Dry-run Web/Telegram integration | MOCKED | Shared authoritative state, one claimed transition/action/result event, correct actor; response `dry_run`, `blocked=false`, `not_verified` |
@@ -113,8 +113,44 @@ an exited one. It keeps `--internal` and moves authenticated HTTP checks into th
 
 The JSON artifact now records every validation stage as PASS, FAIL or NOT RUN, the failed stage,
 and whitelisted container diagnostics with bounded sanitized stdout/stderr logs. It excludes container
-environment arrays, cookies, CSRF values and raw healthcheck output. New CI results will be recorded
-after execution; an absent artifact or unexecuted stage never satisfies the gate.
+environment arrays, cookies, CSRF values and raw healthcheck output. An absent artifact or unexecuted
+stage never satisfies the gate.
+
+### Verified runtime repair — PASS
+
+Fix commit: `124ac4350ee379fcf1afcb53920c61d87040338a`.
+[Actual CI run 44100801008](https://github.com/boi1707/AgentSOC/actions/runs/44100801008) completed
+successfully. All required jobs passed: `test (3.12)`, `test (3.14)`, `console`, and
+`Isolated Python 3.12 image and rollback gate`. The
+[downloaded and inspected Docker artifact](https://github.com/boi1707/AgentSOC/actions/runs/44100801008/artifacts/14336970552)
+reports `classification=PASS` and the exact fix revision. Local regression also passed
+193 tests with one opt-in skip; dedicated tests exercise real localhost HTTP sessions/CSRF and sanitized diagnostics.
+
+The original failure is reproduced in the same internal network: the diagnostic container is
+`running`, exit code `0`, `oom_killed=false`; requested bindings contain `HostIp=127.0.0.1`,
+`HostPort=""`, while effective `NetworkSettings.Ports` is `{"8000/tcp":null}`. The application is
+running, but Docker provides no published port for discovery. The repair does not rely on host
+publishing or weaken `--internal`. Main Backend/Worker requested bindings are empty.
+
+| Docker validation stage (artifact key) | Actual status |
+| --- | --- |
+| `fixture_preparation` | PASS |
+| `compose_configuration` | PASS |
+| `internal_network` | PASS |
+| `python_312` | PASS — 3.12.16 |
+| `legacy_port_diagnostics` | PASS — running container with null effective published port |
+| `backend_worker_startup` | PASS |
+| `shared_image_revision` | PASS — identical image ID and exact revision |
+| `container_health` | PASS — both Docker health checks plus worker command |
+| `session_csrf_api_dry_run` | PASS — authenticated API, CSRF rejection, evidence, approval, duplicate rejection, ingestion |
+| `migration_backup` | PASS — v2, preserved relationships, consistent copy, one additional action, no SSH sentinel |
+| `startup_logs` | PASS |
+| `historical_image_service` | PASS — actual old image service against migrated copy |
+| `historical_image_backend` | PASS — actual old image backend health |
+
+The API probe confirms `RESPONSE_MODE=dry-run`, `blocked=false`, `verification_status=not_verified`
+and a single action attributed to `admin`. No VPS deployment, real notification delivery, SSH/pfSense
+execution, public API exposure or production-data restoration was performed.
 
 ## Migration, relationships and rollback findings
 
@@ -232,7 +268,7 @@ is required by the historical-source compatibility test (`git archive 0022d28 sr
 | `SOURCE_REVISION` build arg | Exact reviewed commit for the image label |
 | `DB`, bind/WireGuard, existing integration settings | Preserve actual deployment values and data mounts |
 
-Manual gates: inventory actual VPS revisions/images/local edits; run Ubuntu/container CI; test actual
+Manual gates: inventory actual VPS revisions/images/local edits; preserve the passing Ubuntu/container CI evidence; test actual
 rollback images on copies; configure/authenticate both Shuffle ingresses; configure bot/test chats and
 operator mapping; execute every real-lab step in the workflow guide; verify Wazuh/TheHive/VirusTotal
 health without changing their configuration. Production deployment requires separate explicit approval.
@@ -405,7 +441,7 @@ The local tests validated restoration into disposable copies only; production re
 
 ## Remaining gates
 
-No real VPS/Shuffle/Telegram configuration was invented, installed or verified. The outstanding
-container gate, actual-image compatibility checks and live-lab workflow configuration are the reason
+No real VPS/Shuffle/Telegram configuration was invented, installed or verified. The container gate
+now passes. Actual VPS-image compatibility checks and live-lab workflow configuration remain the reason
 VPS dry-run readiness is **NO**. Once those pass, request explicit deployment authorization. Live
 blocking readiness remains **NO** regardless of analysis mode or successful dry-run tests.
