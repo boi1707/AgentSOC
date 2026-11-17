@@ -4,29 +4,104 @@ Run on a Docker-equipped Linux host. No production env files or existing Compose
 """
 
 import argparse
-import http.cookiejar
 import json
 import os
+import re
 import secrets
 import sqlite3
 import subprocess
 import tempfile
 import time
 import urllib.error
-import urllib.request
 from pathlib import Path
 
 from scripts.migration_lab import assert_relationships, seed_v1, snapshot
 
+STAGES = (
+    "fixture_preparation",
+    "compose_configuration",
+    "internal_network",
+    "python_312",
+    "legacy_port_diagnostics",
+    "backend_worker_startup",
+    "shared_image_revision",
+    "container_health",
+    "session_csrf_api_dry_run",
+    "migration_backup",
+    "startup_logs",
+    "historical_image_service",
+    "historical_image_backend",
+)
+
+
+def sanitize(value, credentials=()):
+    if isinstance(value, dict):
+        return {key: sanitize(item, credentials) for key, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize(item, credentials) for item in value]
+    if isinstance(value, str):
+        for secret in sorted((s for s in credentials if len(s) >= 4), key=len, reverse=True):
+            value = value.replace(secret, "[REDACTED]")
+        value = re.sub(r"https?://[^\s\"<>]+", "[URL]", value)
+        value = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~-]+", r"\1[REDACTED]", value)
+        value = re.sub(
+            r"(?i)((?:password|token|secret|csrf|cookie|api_key)\s*[=:]\s*)[^\s,;]+", r"\1[REDACTED]", value
+        )
+    return value
+
 
 def docker(*args):
-    try:
-        return subprocess.check_output(
-            ["docker", *map(str, args)], stdin=subprocess.DEVNULL, text=True
-        ).strip()
-    except subprocess.CalledProcessError:
-        # Never echo a command containing even disposable credential arguments into a CI traceback.
-        raise RuntimeError("Docker validation command failed; inspect the isolated test step") from None
+    result = subprocess.run(
+        ["docker", *map(str, args)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        credentials = [str(arg).partition("=")[2] for arg in args if "=" in str(arg)]
+        error = sanitize(result.stderr[-2500:], credentials)
+        raise RuntimeError(f"Docker {args[0]} failed ({result.returncode}): {error}")
+    output = result.stdout + (result.stderr if args[0] == "logs" else "")
+    return output.strip()
+
+
+def advance(report, stage=None):
+    previous = report.pop("active_stage", None)
+    if previous:
+        report["stages"][previous] = "PASS"
+        print(f"PASS: {previous}", flush=True)
+    if stage:
+        report["active_stage"] = stage
+        print(f"RUN: {stage}", flush=True)
+
+
+def container_state(name, credentials=()):
+    # Never inspect Config.Env, labels containing credentials, or raw healthcheck output.
+    template = (
+        '{"status":{{json .State.Status}},"exit_code":{{json .State.ExitCode}},'
+        '"oom_killed":{{json .State.OOMKilled}},"error":{{json .State.Error}},'
+        '"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},'
+        '"ports":{{json .NetworkSettings.Ports}},"requested_bindings":{{json .HostConfig.PortBindings}}}'
+    )
+    return sanitize(json.loads(docker("inspect", "--format", template, name)), credentials)
+
+
+def diagnostics(names, credentials=()):
+    result = {}
+    for name in names:
+        entry = {}
+        for key, operation in (
+            ("state", lambda: container_state(name, credentials)),
+            ("logs", lambda: sanitize(docker("logs", "--tail", "60", name), credentials)),
+        ):
+            try:
+                entry[key] = operation()
+            except Exception as exc:
+                entry[key] = {"error_type": type(exc).__name__}
+        result[name] = entry
+    return result
 
 
 def wait_for(check, timeout=120):
@@ -34,13 +109,19 @@ def wait_for(check, timeout=120):
     while time.monotonic() < deadline:
         try:
             return check()
-        except (AssertionError, urllib.error.URLError, ConnectionError):
+        except (AssertionError, urllib.error.URLError, ConnectionError, RuntimeError):
             time.sleep(1)
     raise AssertionError("Container readiness deadline exceeded")
 
 
 def run(image, previous_image, report_path):
-    report = {"classification": "NOT RUN", "image": image, "previous_image": previous_image, "checks": {}}
+    report = {
+        "classification": "NOT RUN",
+        "image": image,
+        "previous_image": previous_image,
+        "checks": {},
+        "stages": dict.fromkeys(STAGES, "NOT RUN"),
+    }
     prefix = "agentsoc-lab-" + secrets.token_hex(5)
     containers, network = [], prefix + "-net"
     root = Path(__file__).resolve().parents[1]
@@ -55,21 +136,6 @@ def run(image, previous_image, report_path):
         guard.mkdir()
         (guard / "ssh").write_text("#!/bin/sh\ntouch /app/data/ssh-executed\nexit 99\n", encoding="utf-8")
         (guard / "ssh").chmod(0o755)
-        # The image runs as UID 10001. Change ownership only inside this newly-created test mount.
-        docker(
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--user",
-            "0",
-            "-v",
-            f"{data}:/app/data",
-            image,
-            "python",
-            "-c",
-            "import os; os.chown('/app/data/agentsoc.db',10001,10001)",
-        )
         env = {
             "PYTHON_DOTENV_DISABLED": "1",
             "DB": "/app/data/agentsoc.db",
@@ -91,6 +157,23 @@ def run(image, previous_image, report_path):
         }
         env_args = [item for key, value in env.items() for item in ("-e", f"{key}={value}")]
         try:
+            advance(report, "fixture_preparation")
+            # The image runs as UID 10001. Change ownership only inside this newly-created test mount.
+            docker(
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "0",
+                "-v",
+                f"{data}:/app/data",
+                image,
+                "python",
+                "-c",
+                "import os; os.chown('/app/data/agentsoc.db',10001,10001)",
+            )
+            advance(report, "compose_configuration")
             env_path = lab / ".env"
             env_path.write_text(
                 "\n".join(f"{key}={value}" for key, value in env.items()) + "\n", encoding="utf-8"
@@ -124,7 +207,10 @@ def run(image, previous_image, report_path):
                 assert config["image"] == image
                 assert config["environment"]["RESPONSE_MODE"] == "dry-run"
             report["checks"]["compose_configuration"] = "PASS"
+            advance(report, "internal_network")
             docker("network", "create", "--internal", network)
+            assert json.loads(docker("network", "inspect", "--format", "{{json .Internal}}", network)) is True
+            advance(report, "python_312")
             version = docker(
                 "run",
                 "--rm",
@@ -136,6 +222,29 @@ def run(image, previous_image, report_path):
                 "import sys; assert sys.version_info[:2]==(3,12); print(sys.version.split()[0])",
             )
             report["checks"]["python"] = version
+            advance(report, "legacy_port_diagnostics")
+            legacy_probe = prefix + "-port-reproduction"
+            containers.append(legacy_probe)
+            docker(
+                "run",
+                "-d",
+                "--name",
+                legacy_probe,
+                "--network",
+                network,
+                "-p",
+                "127.0.0.1::8000",
+                "-v",
+                f"{data}:/app/data",
+                *env_args,
+                image,
+            )
+            docker("exec", legacy_probe, "python", "-m", "scripts.container_probe", "--health-only")
+            report["legacy_port_reproduction"] = container_state(legacy_probe, env.values())
+            assert report["legacy_port_reproduction"]["status"] == "running"
+            docker("rm", "-f", legacy_probe)
+            containers.remove(legacy_probe)
+            advance(report, "backend_worker_startup")
             for role in ("backend", "worker"):
                 name = prefix + "-" + role
                 containers.append(name)
@@ -158,7 +267,7 @@ def run(image, previous_image, report_path):
                     *env_args,
                 ]
                 if role == "backend":
-                    args += ["-p", "127.0.0.1::8000", image]
+                    args += [image]
                 else:
                     args += [
                         "--health-cmd",
@@ -172,6 +281,10 @@ def run(image, previous_image, report_path):
                     ]
                 docker(*args)
             backend, worker = containers
+            report["container_startup"] = {name: container_state(name, env.values()) for name in containers}
+            assert all(state["status"] == "running" for state in report["container_startup"].values())
+            assert all(not state["requested_bindings"] for state in report["container_startup"].values())
+            advance(report, "shared_image_revision")
             ids = [docker("inspect", "--format", "{{.Image}}", name) for name in containers]
             assert ids[0] == ids[1]
             revision = docker(
@@ -184,62 +297,16 @@ def run(image, previous_image, report_path):
             assert revision and revision != "unknown"
             report["checks"]["shared_image_id"] = ids[0]
             report["checks"]["source_revision"] = revision
-            port = docker("port", backend, "8000/tcp").split(":")[-1]
-            base = f"http://127.0.0.1:{port}"
-            opener = urllib.request.build_opener(
-                urllib.request.ProxyHandler({}),
-                urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
-            )
-            csrf = ""
-
-            def request(path, payload=None):
-                headers = {"Content-Type": "application/json", "X-CSRF-Token": csrf}
-                raw = json.dumps(payload).encode() if payload is not None else None
-                with opener.open(
-                    urllib.request.Request(base + path, data=raw, headers=headers), timeout=5
-                ) as response:
-                    return json.load(response)
-
-            wait_for(lambda: request("/ready"))
-            assert request("/live")["status"] == "alive"
-            assert request("/health")["response_mode"] == "dry-run"
-            docker("exec", worker, "python", "-m", "src.worker", "--health")
+            advance(report, "container_health")
+            docker("exec", backend, "python", "-m", "scripts.container_probe", "--health-only")
             wait_for(lambda: _healthy(backend, worker))
-            csrf = request("/api/v1/auth/login", {"username": "admin", "password": "lab-review-" + "r" * 32})[
-                "csrf"
-            ]
-            cases = request("/api/v1/incidents")["items"]
-            assert len(cases) == 2
-            pending = next(case for case in cases if case["status"] == "pending")
-            assert request("/api/v1/assistant/query", {"message": "why", "incident_id": pending["id"]})[
-                "citations"
-            ]
-            outcome = request(
-                "/api/v1/incidents/" + pending["id"] + "/response",
-                {"decision": "approve", "run_id": pending["latest_run_id"]},
+            docker("exec", worker, "python", "-m", "src.worker", "--health")
+            advance(report, "session_csrf_api_dry_run")
+            report["api_probe"] = json.loads(
+                docker("exec", backend, "python", "-m", "scripts.container_probe")
             )
-            assert outcome["status"] == "dry_run" and outcome["blocked"] is False
-            assert outcome["verification_status"] == "not_verified"
-            # Exercise ingestion and the independent worker with the supported synthetic dataset.
-            for line in (root / "datasets/demo.jsonl").read_text(encoding="utf-8").splitlines():
-                raw = json.dumps(json.loads(line)).encode()
-                req = urllib.request.Request(
-                    base + "/ingest",
-                    data=raw,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": "Bearer " + env["INGEST_KEY"],
-                    },
-                )
-                with opener.open(req, timeout=5) as response:
-                    assert response.status == 202
-
-            def processed():
-                rows = request("/api/v1/incidents")["items"]
-                assert len(rows) >= 3 and any(c["status"] == "pending" for c in rows)
-                return True
-
-            wait_for(processed)
+            assert set(report["api_probe"].values()) == {"PASS"}
+            advance(report, "migration_backup")
             docker(
                 "exec",
                 backend,
@@ -259,6 +326,7 @@ def run(image, previous_image, report_path):
             assert len(migrated["actions"]) == len(original["actions"]) + 1
             assert not (data / "ssh-executed").exists()
             report["checks"]["runtime_and_dry_run"] = "PASS"
+            advance(report, "startup_logs")
             for name in containers:
                 logs = docker("logs", name)
                 assert not any(
@@ -270,6 +338,7 @@ def run(image, previous_image, report_path):
                     )
                 )
             report["checks"]["startup_logs"] = "PASS"
+            advance(report, "historical_image_service")
             # Run the old application/worker against a COPY of the migrated database, never the active one.
             rollback = lab / "rollback"
             rollback.mkdir()
@@ -305,6 +374,7 @@ def run(image, previous_image, report_path):
                 "-c",
                 code,
             )
+            advance(report, "historical_image_backend")
             # An old backend must also serve the migrated copy and pass its health endpoint.
             old_backend = prefix + "-rollback"
             containers.append(old_backend)
@@ -322,10 +392,32 @@ def run(image, previous_image, report_path):
             )
             wait_for(lambda: _old_health(old_backend))
             report["checks"]["previous_image_migrated_copy"] = "PASS"
+            advance(report)
             report["classification"] = "PASS"
-        except BaseException:
+        except BaseException as exc:
             report["classification"] = "FAIL"
-            raise
+            active = report.pop("active_stage", None)
+            if active:
+                report["stages"][active] = "FAIL"
+            report["failed_stage"] = active or "fixture_preparation"
+            report["error"] = {
+                "type": type(exc).__name__,
+                "message": sanitize(str(exc), (*env.values(), "lab-review-" + "r" * 32)),
+            }
+            report["diagnostics"] = diagnostics(containers, (*env.values(), "lab-review-" + "r" * 32))
+            print(
+                json.dumps(
+                    {
+                        "failed_stage": report["failed_stage"],
+                        "error": report["error"],
+                        "diagnostics": report["diagnostics"],
+                    }
+                ),
+                flush=True,
+            )
+            raise RuntimeError(
+                f"Container validation failed at {report['failed_stage']}; see JSON diagnostics"
+            ) from None
         finally:
             Path(report_path).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             for name in reversed(containers):

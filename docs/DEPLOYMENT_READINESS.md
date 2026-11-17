@@ -19,7 +19,7 @@ requires the actual VPS, Shuffle, Telegram or integrations. A mocked result is n
 
 | Validation | Status | Actual result / limit |
 | --- | --- | --- |
-| Full backend regression | PASS | `189 passed, 1 skipped` in 98.63 seconds, Windows Python 3.14; includes mocked external integrations |
+| Full backend regression | PASS | Runtime-fix regression: `193 passed, 1 skipped` in 101.54 seconds, Windows Python 3.14; two dependency deprecation warnings; includes mocked external integrations |
 | Focused Phase 2/assistant tests | PASS | `46 passed` before adding the sixth migration test; all are included in the final full run |
 | Ruff lint and formatting | PASS | Ruff 0.17.3, matching the development lock; `src scripts tests integrations` |
 | Python compile check | PASS | `compileall` over source, scripts, integration helpers and tests |
@@ -30,8 +30,9 @@ requires the actual VPS, Shuffle, Telegram or integrations. A mocked result is n
 | SQL failure / abrupt migration interruption | PASS | Injected failure rolls back DDL/data; subprocess exit before commit recovers original schema/data and can retry |
 | WAL-aware backup / disposable restore | PASS | SQLite online backup includes committed WAL state and excludes an in-flight transaction; backup restores into a separate database |
 | Previous application source with migrated schema | PASS | Historical `0022d28` backend and worker service run against a migrated copy; incidents/runs/evidence/actions/outbox preserved |
-| Docker image build and Python 3.12 runtime | NOT RUN | Docker is not installed locally; Ubuntu CI gate implemented but not executed in this session |
-| Backend/Worker container health, shared image revision | NOT RUN | Automated gate prepared; no container success claimed |
+| Docker image builds and Python 3.12 interpreter | PASS | Initial Ubuntu run `44098787194` built both images and passed the interpreter assertion |
+| Docker runtime gate | FAIL | Initial run `44098787194` failed at host port discovery; corrected container-local validation awaits a new CI run |
+| Backend/Worker container health | NOT RUN | Initial run stopped before health/API validation; no health success claimed |
 | Previous **image** with migrated database copy | NOT RUN | CI builds the historical image and checks its service/backend against a copy; distinct from the source-level PASS above |
 | Proactive two-chat delivery, inline callbacks and final result delivery | MOCKED | Real local API/storage with mocked Shuffle/Telegram HTTP and a persistent disposable delivery ledger; one logical result sent separately to each chat |
 | Callback auth, idempotency, races, policy and audit | MOCKED | Fifteen workflow/security test cases described below; no live messages/firewall calls |
@@ -90,8 +91,11 @@ python -m scripts.validate_docker \
 The gate copies Compose YAML into its temporary project before parsing it with a synthetic `.env`;
 it does not resolve the real repository `.env`. Runtime containers are started directly with matching
 read-only/security/worker settings on an isolated internal network. They share only disposable data,
-receive generated test credentials and empty external-service configuration, and publish a random
-loopback-only port. This verifies container startup, not a production Compose rollout.
+receive generated test credentials and empty external-service configuration. API checks execute inside
+Backend against its own localhost:8000, with a persistent cookie jar and CSRF header in one probe
+process. Backend/Worker publish no host ports. A short-lived diagnostic reproduction alone requests
+the original loopback-only binding and records state/ports before removal. This verifies container
+startup, not a production Compose rollout.
 
 Assertions include actual interpreter 3.12, equal Backend/Worker image IDs, a nonempty revision label,
 `/live`, `/health`, `/ready`, Docker health states and worker `--health`; incident APIs, assistant
@@ -100,9 +104,17 @@ worker. It checks the new action count, migration version/relationships, absence
 and startup errors. Historical service/backend checks use a SQLite backup copy rather than the active
 test database. CI uploads its JSON result as `docker-validation-result`; build/startup failure is not success.
 
-**Current status: NOT RUN.** The workflow has not been pushed/executed by this session. Review the PR's
-actual Ubuntu Python 3.12, Python 3.14, browser and container jobs and download the artifact before
-changing readiness. An absent artifact or an unexecuted job does not satisfy the gate.
+**Initial CI status: FAIL.** [Run 44098787194](https://github.com/boi1707/AgentSOC/actions/runs/44098787194)
+passed Python 3.12, Python 3.14 and console jobs. Both images built successfully. The runtime harness
+failed at `docker port` before health/API/rollback checks. The old containers were removed by cleanup,
+so their state cannot be inspected retrospectively. The repair records state, exit code, health,
+`NetworkSettings.Ports` and requested bindings in CI to distinguish a running unexposed container from
+an exited one. It keeps `--internal` and moves authenticated HTTP checks into the container.
+
+The JSON artifact now records every validation stage as PASS, FAIL or NOT RUN, the failed stage,
+and whitelisted container diagnostics with bounded sanitized stdout/stderr logs. It excludes container
+environment arrays, cookies, CSRF values and raw healthcheck output. New CI results will be recorded
+after execution; an absent artifact or unexecuted stage never satisfies the gate.
 
 ## Migration, relationships and rollback findings
 
