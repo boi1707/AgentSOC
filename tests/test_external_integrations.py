@@ -151,11 +151,11 @@ def test_vt_malformed_report_retries(settings):
     assert incident_integrations(store, cid)["virustotal"][0]["error"] == "KeyError"
 
 
-def test_shuffle_only_after_approved_result_not_pending_or_rejected(settings):
+def test_shuffle_notifies_both_decision_results_but_not_pending(settings):
     store, cid = completed(settings)
     assert incident_integrations(store, cid)["shuffle"] == []
     store.record_action(cid, "reject", None, "dry-run", "rejected")
-    assert incident_integrations(store, cid)["shuffle"] == []
+    assert len(incident_integrations(store, cid)["shuffle"]) == 1
     store.record_action(cid, "approve", "192.168.20.50", "dry-run", "dry_run")
     settings.shuffle_hook = "http://shuffle:5001/api/v1/hooks/webhook_fixture"
     bodies = []
@@ -171,7 +171,8 @@ def test_shuffle_only_after_approved_result_not_pending_or_rejected(settings):
     transport = httpx.MockTransport(handler)
     deliver_pending(store, settings, transport=transport)
     deliver_pending(Store(settings.db), settings, transport=transport)
-    assert len(bodies) == 1
+    assert len(bodies) == 2
+    assert {body["decision"] for body in bodies} == {"approve", "reject"}
     assert incident_integrations(store, cid)["shuffle"][0]["status"] == "delivered"
     assert store.get(cid)["status"] == "dry_run"
 
@@ -273,7 +274,12 @@ def test_new_secrets_masked_in_logs_and_ui(settings):
         client.post("/api/v1/auth/login", json={"username": "admin", "password": settings.approve_key})
         health = client.get("/api/v1/system")
         assert health.status_code == 200
-        assert set(health.json()["integrations"]) == {"thehive", "shuffle", "virustotal"}
+        assert set(health.json()["integrations"]) == {
+            "thehive",
+            "shuffle",
+            "virustotal",
+            "proposal_notifications",
+        }
         assert settings.vt_key not in health.text
         assert settings.shuffle_hook not in health.text
 

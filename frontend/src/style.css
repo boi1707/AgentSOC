@@ -1578,3 +1578,21 @@ footer {
     padding: 7px;
   }
 }
+/* Assistant overlays leave the incident workspace available underneath. */
+.language-switch { display: inline-flex; white-space: nowrap; font-size: 12px; align-items: center; }
+.language-switch button { border: 0; background: transparent; padding: 4px; color: inherit; }
+.language-switch button[aria-pressed="true"] { color: #66d9c4; font-weight: 700; }
+.login > .language-switch { position: absolute; right: 24px; top: 20px; }
+.assistant { position: fixed; bottom: 22px; right: 22px; z-index: 40; }
+.assistant-panel { width: min(490px, calc(100vw - 28px)); height: min(740px, calc(100dvh - 110px)); display: flex; flex-direction: column; padding: 18px; margin-bottom: 12px; box-shadow: 0 10px 40px #0008; }
+.assistant-entry { float: right; }
+.assistant-panel .panel-heading { padding: 0; }
+.assistant-suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.assistant-suggestions button { font-size: 12px; padding: 6px; }
+.assistant-messages { flex: 1; min-height: 80px; overflow-y: auto; overflow-wrap: anywhere; }
+.assistant-messages article { border-top: 1px solid #354552; padding: 12px 0; }
+.assistant-messages p { margin: 8px 0; }
+.assistant-panel form { display: flex; gap: 8px; margin-top: 10px; }
+.assistant-panel textarea { flex: 1; min-width: 0; max-height: 100px; }
+.assistant-interpretation { white-space: pre-wrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

@@ -6,6 +6,8 @@ COPY frontend/ ./
 RUN npm run build
 
 FROM python:3.12-slim
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/* \

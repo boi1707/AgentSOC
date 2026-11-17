@@ -1,3 +1,5 @@
+import { t, useLanguage, LanguageSwitcher } from "./i18n";
+import { AssistantPanel } from "./AssistantPanel";
 import React, {
   useEffect,
   useRef,
@@ -67,17 +69,20 @@ const stamp = (value: number | null | undefined) =>
     ? new Date(value * 1000).toLocaleString(undefined, {
         dateStyle: "medium",
         timeStyle: "medium",
-      }) + " (local)"
-    : "No data";
+      }) +
+      " (" +
+      t("local") +
+      ")"
+    : t("No data");
 const relative = (value: number | null | undefined) =>
   !value
-    ? "No data"
-    : `${Math.max(0, Math.floor(Date.now() / 1000 - value)) < 60 ? "Just now" : Math.floor((Date.now() / 1000 - value) / 60) + "m ago"}`;
+    ? t("No data")
+    : `${Math.max(0, Math.floor(Date.now() / 1000 - value)) < 60 ? t("Just now") : Math.floor((Date.now() / 1000 - value) / 60) + t("m ago")}`;
 const short = (id: string) => (id.length > 16 ? id.slice(0, 12) : id);
 function Badge({ value }: { value: string | undefined }) {
   return (
     <span className={"badge " + (value ?? "unknown")}>
-      {value ?? "No data"}
+      {t(value ?? "No data")}
     </span>
   );
 }
@@ -95,7 +100,7 @@ function Provenance({
       {!!synthetic && <Badge value="synthetic" />}
       {mode && <Badge value={mode} />}
       {provenance === "legacy_unknown" && (
-        <span title="Historical data has no recorded provenance">
+        <span title={t("Historical data has no recorded provenance")}>
           <Badge value="legacy" />
         </span>
       )}
@@ -106,7 +111,7 @@ function Json({ value }: { value: unknown }) {
   return (
     <pre className="json">
       {value === null || value === undefined
-        ? "No data"
+        ? t("No data")
         : typeof value === "string"
           ? value
           : JSON.stringify(value, null, 2)}
@@ -128,18 +133,20 @@ function State({
     return (
       <div className="empty" role="status">
         <RefreshCw size={22} className="spin" />
-        <h3>Loading operational data</h3>
-        <p>Reading from AgentSOC.</p>
+        <h3>{t("Loading operational data")}</h3>
+        <p>{t("Reading from AgentSOC.")}</p>
       </div>
     );
   if (error)
     return (
       <div className="empty error" role="alert">
         <TriangleAlert />
-        <h3>Unable to load data</h3>
-        <p>{error}</p>
+        <h3>{t("Unable to load data")}</h3>
+        <p>{t(error)}</p>
         <p>
-          Check the API connection and sign in again if your session expired.
+          {t(
+            "Check the API connection and sign in again if your session expired.",
+          )}
         </p>
       </div>
     );
@@ -147,9 +154,11 @@ function State({
     return (
       <div className="empty">
         <Layers size={30} />
-        <h3>No records to display</h3>
+        <h3>{t("No records to display")}</h3>
         <p>
-          Connect Wazuh or adjust the filters. This console does not seed data.
+          {t(
+            "Connect Wazuh or adjust the filters. This console does not seed data.",
+          )}
         </p>
       </div>
     );
@@ -191,19 +200,19 @@ function Pager({
       <span>
         {total
           ? `${offset + 1}–${Math.min(offset + 25, total)} of ${total}`
-          : "0 records"}{" "}
-        · server paginated
+          : t("0 records")}{" "}
+        {t("· server paginated")}
       </span>
       <div>
         <button
-          aria-label="Previous page"
+          aria-label={t("Previous page")}
           disabled={!offset}
           onClick={() => change(Math.max(0, offset - 25))}
         >
           <ChevronLeft size={16} />
         </button>
         <button
-          aria-label="Next page"
+          aria-label={t("Next page")}
           disabled={offset + 25 >= total}
           onClick={() => change(offset + 25)}
         >
@@ -215,13 +224,13 @@ function Pager({
 }
 function Updated({ value, error }: { value?: number; error?: string }) {
   return (
-    <span className={"updated " + (error ? "warn" : "")}>
+    <span className={t("updated ") + (error ? "warn" : "")}>
       <span className="dot" />
       {error
-        ? "Disconnected · showing stale data"
+        ? t("Disconnected · showing stale data")
         : value
-          ? "Updated " + new Date(value).toLocaleTimeString()
-          : "Waiting for API"}
+          ? t("Updated ") + new Date(value).toLocaleTimeString()
+          : t("Waiting for API")}
     </span>
   );
 }
@@ -242,7 +251,7 @@ function Modal({
     <dialog ref={ref} onCancel={onClose}>
       <div className="modal-title">
         <h2>{title}</h2>
-        <button aria-label="Close detail" onClick={onClose}>
+        <button aria-label={t("Close detail")} onClick={onClose}>
           <X size={18} />
         </button>
       </div>
@@ -256,11 +265,11 @@ function IncidentTable({ items }: { items: Incident[] }) {
       <table>
         <thead>
           <tr>
-            <th>Incident / evidence</th>
-            <th>Priority</th>
-            <th>Workflow</th>
-            <th>AI verdict</th>
-            <th>Created</th>
+            <th>{t("Incident / evidence")}</th>
+            <th>{t("Priority")}</th>
+            <th>{t("Workflow")}</th>
+            <th>{t("AI verdict")}</th>
+            <th>{t("Created")}</th>
             <th />
           </tr>
         </thead>
@@ -277,8 +286,8 @@ function IncidentTable({ items }: { items: Incident[] }) {
                     INC-{short(c.id)}
                   </Link>
                   <span className="sub">
-                    {c.incident.raw_ids.length} alerts · {c.incident.ips.length}{" "}
-                    IP entities{" "}
+                    {c.incident.raw_ids.length} {t("alerts ·")}
+                    {c.incident.ips.length} {t("IP entities")}{" "}
                     <Provenance
                       provenance={c.provenance}
                       synthetic={c.synthetic}
@@ -292,19 +301,19 @@ function IncidentTable({ items }: { items: Incident[] }) {
                   <Badge value={c.workflow_status} />
                 </td>
                 <td>
-                  <Badge value={c.verdict.verdict ?? "not analyzed"} />
+                  <Badge value={c.verdict.verdict ?? t("not analyzed")} />
                   <span className="sub">
                     {c.verdict.confidence === undefined
-                      ? "Not measured"
+                      ? t("Not measured")
                       : Math.round(c.verdict.confidence * 100) +
-                        "% confidence"}{" "}
+                        t("% confidence")}{" "}
                     <Provenance mode={c.verdict.mode} />
                   </span>
                 </td>
                 <td className="muted small">{stamp(c.created)}</td>
                 <td>
                   <Link
-                    aria-label={"Open incident " + c.id}
+                    aria-label={t("Open incident ") + c.id}
                     to={"/console/incidents/" + c.id}
                   >
                     <ArrowUpRight size={16} />
@@ -324,14 +333,16 @@ function OverviewPage() {
   return (
     <>
       <PageTitle
-        eyebrow="COMMAND CENTER"
-        title="Security overview"
-        description="Your alert pipeline, investigation workload, and operational signals."
+        eyebrow={t("COMMAND CENTER")}
+        title={t("Security overview")}
+        description={t(
+          "Your alert pipeline, investigation workload, and operational signals.",
+        )}
       >
         <Updated value={query.updated} error={query.error} />
         <button onClick={query.refresh}>
           <RefreshCw size={15} />
-          Refresh
+          {t("Refresh")}
         </button>
       </PageTitle>
       <State loading={!d && query.loading} error={!d ? query.error : undefined}>
@@ -339,13 +350,14 @@ function OverviewPage() {
           <>
             {query.error && (
               <div className="notice warn">
-                Connection lost. Values below are stale.
+                {t("Connection lost. Values below are stale.")}
               </div>
             )}
             {d.system.demo && (
               <div className="notice">
-                Synthetic demo database · mock analysis · no notifications or
-                real response.
+                {t(
+                  "Synthetic demo database · mock analysis · no notifications or real response.",
+                )}
               </div>
             )}
             <div className="kpis">
@@ -391,23 +403,23 @@ function OverviewPage() {
               <section className="panel chart">
                 <div className="panel-heading">
                   <div>
-                    <h2>Alert activity</h2>
-                    <p>Received events per hour · last 24 hours</p>
+                    <h2>{t("Alert activity")}</h2>
+                    <p>{t("Received events per hour · last 24 hours")}</p>
                   </div>
-                  <span className="tag">UTC buckets</span>
+                  <span className="tag">{t("UTC buckets")}</span>
                 </div>
                 <ActivityChart values={d.series} />
                 <div className="chart-axis">
-                  <span>24 hours ago</span>
-                  <span>12 hours ago</span>
-                  <span>Now</span>
+                  <span>{t("24 hours ago")}</span>
+                  <span>{t("12 hours ago")}</span>
+                  <span>{t("Now")}</span>
                 </div>
               </section>
               <section className="panel">
                 <div className="panel-heading">
                   <div>
-                    <h2>Severity distribution</h2>
-                    <p>All received alerts</p>
+                    <h2>{t("Severity distribution")}</h2>
+                    <p>{t("All received alerts")}</p>
                   </div>
                   <Filter size={16} />
                 </div>
@@ -439,11 +451,12 @@ function OverviewPage() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Recent incidents</h2>
-                  <p>Latest investigations and human review decisions</p>
+                  <h2>{t("Recent incidents")}</h2>
+                  <p>{t("Latest investigations and human review decisions")}</p>
                 </div>
                 <Link className="text-link" to="/console/incidents">
-                  View queue <ArrowUpRight size={14} />
+                  {t("View queue")}
+                  <ArrowUpRight size={14} />
                 </Link>
               </div>
               <State empty={!d.recent.length}>
@@ -457,21 +470,27 @@ function OverviewPage() {
                 />
                 <strong>
                   {d.system.worker_fresh
-                    ? "Worker active"
-                    : "Worker unavailable"}
+                    ? t("Worker active")
+                    : t("Worker unavailable")}
                 </strong>
-                <span>{d.system.backlog} jobs pending</span>
+                <span>
+                  {d.system.backlog} {t("jobs pending")}
+                </span>
               </div>
               <div>
                 <Database size={15} />
-                <span>SQLite ready</span>
+                <span>{t("SQLite ready")}</span>
               </div>
               <div>
                 <Clock size={15} />
-                <span>Last alert: {relative(d.system.last_alert_at)}</span>
+                <span>
+                  {t("Last alert:")}
+                  {relative(d.system.last_alert_at)}
+                </span>
               </div>
               <Link to="/console/system">
-                System health <ChevronRight size={14} />
+                {t("System health")}
+                <ChevronRight size={14} />
               </Link>
             </div>
           </>
@@ -491,7 +510,11 @@ function ActivityChart({
     .join(" ");
   return (
     <div className="chart-wrap">
-      <svg viewBox="0 0 960 180" role="img" aria-label="Hourly alert counts">
+      <svg
+        viewBox="0 0 960 180"
+        role="img"
+        aria-label={t("Hourly alert counts")}
+      >
         <g stroke="#263041" strokeDasharray="3 5">
           {[30, 70, 110, 155].map((y) => (
             <line x1="0" x2="960" y1={y} y2={y} key={y} />
@@ -525,7 +548,7 @@ function ActivityChart({
       </svg>
       {!values.some((v) => v.count > 0) && (
         <span className="chart-empty">
-          No alerts received in this time window
+          {t("No alerts received in this time window")}
         </span>
       )}
     </div>
@@ -552,48 +575,48 @@ function ScopeFilters({
     <details className="scope-filters">
       <summary>
         <Filter size={13} />
-        Entity, source and time filters
+        {t("Entity, source and time filters")}
       </summary>
       <div className="filter-bar">
         <label>
-          Source ID
+          {t("Source ID")}
           <input
-            aria-label="Source ID"
+            aria-label={t("Source ID")}
             maxLength={64}
             value={value.source}
             onChange={(e) => change({ ...value, source: e.target.value })}
-            placeholder="Any source"
+            placeholder={t("Any source")}
           />
         </label>
         <label>
-          Entity
+          {t("Entity")}
           <input
-            aria-label="Entity key"
+            aria-label={t("Entity key")}
             maxLength={300}
             value={value.entity}
             onChange={(e) => change({ ...value, entity: e.target.value })}
-            placeholder="ip:? or host:?"
+            placeholder={t("ip:? or host:?")}
           />
         </label>
         <label>
-          From (local)
+          {t("From (local)")}
           <input
-            aria-label="From time"
+            aria-label={t("From time")}
             type="datetime-local"
             value={value.since}
             onChange={(e) => change({ ...value, since: e.target.value })}
           />
         </label>
         <label>
-          Until (local)
+          {t("Until (local)")}
           <input
-            aria-label="Until time"
+            aria-label={t("Until time")}
             type="datetime-local"
             value={value.until}
             onChange={(e) => change({ ...value, until: e.target.value })}
           />
         </label>
-        <button onClick={() => change(emptyScope)}>Clear scope</button>
+        <button onClick={() => change(emptyScope)}>{t("Clear scope")}</button>
       </div>
     </details>
   );
@@ -620,46 +643,50 @@ function AlertsPage() {
   return (
     <>
       <PageTitle
-        eyebrow="TELEMETRY"
-        title="Alert inbox"
-        description="Original Wazuh alerts, normalized fields, and correlation provenance."
+        eyebrow={t("TELEMETRY")}
+        title={t("Alert inbox")}
+        description={t(
+          "Original Wazuh alerts, normalized fields, and correlation provenance.",
+        )}
       >
         <Updated value={query.updated} error={query.error} />
-        <span className="tag">Wazuh adapter v1</span>
+        <span className="tag">{t("Wazuh adapter v1")}</span>
       </PageTitle>
       <div className="filter-bar">
         <label className="search">
           <Search size={16} />
           <input
-            aria-label="Search alerts"
-            placeholder="Search alert ID, host or evidence…"
+            aria-label={t("Search alerts")}
+            placeholder={t("Search alert ID, host or evidence…")}
             value={q}
             onChange={(e) => filter(() => setQ(e.target.value))}
           />
         </label>
         <select
-          aria-label="Severity filter"
+          aria-label={t("Severity filter")}
           value={severity}
           onChange={(e) => filter(() => setSeverity(e.target.value))}
         >
-          <option value="">All severities</option>
+          <option value="">{t("All severities")}</option>
           {["critical", "high", "medium", "low", "info"].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
         <select
-          aria-label="Correlation filter"
+          aria-label={t("Correlation filter")}
           value={status}
           onChange={(e) => filter(() => setStatus(e.target.value))}
         >
-          <option value="">All correlation states</option>
-          <option>pending</option>
-          <option>correlated</option>
-          <option>uncorrelated</option>
+          <option value="">{t("All correlation states")}</option>
+          <option value="pending">{t("pending")}</option>
+          <option value="correlated">{t("correlated")}</option>
+          <option value="uncorrelated">{t("uncorrelated")}</option>
         </select>
         <button onClick={query.refresh}>
           <RefreshCw size={15} />
-          Refresh
+          {t("Refresh")}
         </button>
       </div>
       <ScopeFilters
@@ -672,10 +699,11 @@ function AlertsPage() {
       <section className="panel">
         <div className="panel-heading">
           <h2>
-            Received alerts <span className="count">{d?.total ?? "—"}</span>
+            {t("Received alerts")}
+            <span className="count">{d?.total ?? "—"}</span>
           </h2>
           <span className="muted small">
-            Sorted by received time · newest first
+            {t("Sorted by received time · newest first")}
           </span>
         </div>
         <State
@@ -689,12 +717,12 @@ function AlertsPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Alert</th>
-                      <th>Severity</th>
-                      <th>Event type / host</th>
-                      <th>Network evidence</th>
-                      <th>Correlation</th>
-                      <th>Received</th>
+                      <th>{t("Alert")}</th>
+                      <th>{t("Severity")}</th>
+                      <th>{t("Event type / host")}</th>
+                      <th>{t("Network evidence")}</th>
+                      <th>{t("Correlation")}</th>
+                      <th>{t("Received")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -709,7 +737,7 @@ function AlertsPage() {
                           </Link>
                           <span className="sub truncate">
                             {a.normalized.evidence.description ||
-                              "No description"}{" "}
+                              t("No description")}{" "}
                             <Provenance
                               provenance={a.provenance}
                               synthetic={a.synthetic}
@@ -720,10 +748,10 @@ function AlertsPage() {
                           <Badge value={a.severity} />
                         </td>
                         <td>
-                          {a.event_type}
+                          {t(a.event_type)}
                           <span className="sub mono">
                             {a.normalized.evidence.hostname ||
-                              "No host identity"}
+                              t("No host identity")}
                           </span>
                         </td>
                         <td className="mono small">
@@ -765,12 +793,14 @@ function AlertPage() {
     <>
       <Link className="back" to="/console/alerts">
         <ChevronLeft size={15} />
-        Alert inbox
+        {t("Alert inbox")}
       </Link>
       <PageTitle
-        eyebrow="SOURCE EVIDENCE"
-        title={d ? "Alert " + short(d.id) : "Alert detail"}
-        description="Preserved source payload and the normalized envelope used for correlation."
+        eyebrow={t("SOURCE EVIDENCE")}
+        title={d ? t("Alert ") + short(d.id) : t("Alert detail")}
+        description={t(
+          "Preserved source payload and the normalized envelope used for correlation.",
+        )}
       />
       <State loading={!d && query.loading} error={query.error}>
         {d && (
@@ -779,28 +809,36 @@ function AlertPage() {
               <Badge value={d.severity} />
               <Badge value={d.correlation_status} />
               <Provenance provenance={d.provenance} synthetic={d.synthetic} />
-              <span>Source: {d.source}</span>
-              <span>Received: {stamp(d.received)}</span>
+              <span>
+                {t("Source:")}
+                {d.source}
+              </span>
+              <span>
+                {t("Received:")}
+                {stamp(d.received)}
+              </span>
               {d.case_id && (
                 <Link to={"/console/incidents/" + d.case_id}>
-                  Open incident <ExternalLink size={13} />
+                  {t("Open incident")}
+                  <ExternalLink size={13} />
                 </Link>
               )}
             </div>
             <div className="two-columns">
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>Normalized envelope</h2>
+                  <h2>{t("Normalized envelope")}</h2>
                   <span className="tag">
-                    schema v{d.normalized.schema_version}
+                    {t("schema v")}
+                    {d.normalized.schema_version}
                   </span>
                 </div>
                 <Json value={d.normalized} />
               </section>
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>Original JSON</h2>
-                  <span className="tag">Local evidence</span>
+                  <h2>{t("Original JSON")}</h2>
+                  <span className="tag">{t("Local evidence")}</span>
                 </div>
                 <Json value={d.raw_event} />
               </section>
@@ -832,44 +870,50 @@ function IncidentsPage() {
   return (
     <>
       <PageTitle
-        eyebrow="INVESTIGATION"
-        title="Incident queue"
-        description="Correlated alerts, independent workflow state, and evidence-backed AI verdicts."
+        eyebrow={t("INVESTIGATION")}
+        title={t("Incident queue")}
+        description={t(
+          "Correlated alerts, independent workflow state, and evidence-backed AI verdicts.",
+        )}
       >
         <Updated value={query.updated} error={query.error} />
       </PageTitle>
       <div className="filter-bar">
         <Filter size={16} />
         <select
-          aria-label="Workflow filter"
+          aria-label={t("Workflow filter")}
           value={status}
           onChange={(e) => {
             setStatus(e.target.value);
             setOffset(0);
           }}
         >
-          <option value="">All workflow states</option>
+          <option value="">{t("All workflow states")}</option>
           {["open", "investigating", "review", "closed"].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
         <select
-          aria-label="Incident severity filter"
+          aria-label={t("Incident severity filter")}
           value={severity}
           onChange={(e) => {
             setSeverity(e.target.value);
             setOffset(0);
           }}
         >
-          <option value="">All severities</option>
+          <option value="">{t("All severities")}</option>
           {["critical", "high", "medium", "low", "info"].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
         <span className="filter-spacer" />
         <button onClick={query.refresh}>
           <RefreshCw size={15} />
-          Refresh
+          {t("Refresh")}
         </button>
       </div>
       <ScopeFilters
@@ -882,10 +926,11 @@ function IncidentsPage() {
       <section className="panel">
         <div className="panel-heading">
           <h2>
-            Investigations <span className="count">{d?.total ?? "—"}</span>
+            {t("Investigations")}
+            <span className="count">{d?.total ?? "—"}</span>
           </h2>
           <span className="small muted">
-            Workflow ≠ AI verdict ≠ response status
+            {t("Workflow ≠ AI verdict ≠ response status")}
           </span>
         </div>
         <State
@@ -932,20 +977,20 @@ function IncidentPage() {
     <>
       <Link className="back" to="/console/incidents">
         <ChevronLeft size={15} />
-        Incident queue
+        {t("Incident queue")}
       </Link>
       <PageTitle
-        eyebrow="INCIDENT WORKSPACE"
-        title={d ? "INC-" + short(d.id) : "Investigation"}
+        eyebrow={t("INCIDENT WORKSPACE")}
+        title={d ? "INC-" + short(d.id) : t("Investigation")}
         description={
           d
-            ? "Created " + stamp(d.created)
-            : "Loading evidence and investigation history"
+            ? t("Created ") + stamp(d.created)
+            : t("Loading evidence and investigation history")
         }
       >
         <button onClick={query.refresh}>
           <RefreshCw size={15} />
-          Refresh
+          {t("Refresh")}
         </button>
       </PageTitle>
       <State loading={!d && query.loading} error={!d ? query.error : undefined}>
@@ -953,7 +998,7 @@ function IncidentPage() {
           <>
             <div className="detail-meta">
               <Badge value={d.workflow_status} />
-              <Badge value={d.verdict.verdict ?? "not analyzed"} />
+              <Badge value={d.verdict.verdict ?? t("not analyzed")} />
               <Provenance
                 provenance={d.provenance}
                 synthetic={d.synthetic}
@@ -963,7 +1008,7 @@ function IncidentPage() {
             </div>
             {error && (
               <div role="alert" className="notice warn">
-                {error}
+                {t(error)}
               </div>
             )}
             <div className="investigation-layout">
@@ -972,7 +1017,7 @@ function IncidentPage() {
                   <div className="panel-heading">
                     <h2>
                       <Shield size={17} />
-                      Decision summary
+                      {t("Decision summary")}
                     </h2>
                     <Badge value={d.verdict.verdict ?? "queued"} />
                   </div>
@@ -982,32 +1027,35 @@ function IncidentPage() {
                   </p>
                   <div className="verdict-facts">
                     <div>
-                      <small>Confidence</small>
+                      <small>{t("Confidence")}</small>
                       <strong>
                         {d.verdict.confidence === undefined
-                          ? "Not measured"
+                          ? t("Not measured")
                           : Math.round(d.verdict.confidence * 100) + "%"}
                       </strong>
                     </div>
                     <div>
-                      <small>Citation groundedness</small>
+                      <small>{t("Citation groundedness")}</small>
                       <strong>
                         {d.verdict.grounded === undefined
-                          ? "No data"
+                          ? t("No data")
                           : Math.round(d.verdict.grounded * 100) + "%"}
                       </strong>
                     </div>
                     <div>
-                      <small>Evidence in context</small>
+                      <small>{t("Evidence in context")}</small>
                       <strong>
-                        {d.incident.alerts.length} / {d.evidence.length} alerts
+                        {d.incident.alerts.length} / {d.evidence.length}{" "}
+                        {t("alerts")}
                       </strong>
                     </div>
                   </div>
                   {d.incident.dropped_rows > 0 && (
                     <div className="notice">
-                      {d.incident.dropped_rows} deduplicated rows omitted from
-                      model context. Original evidence remains below.
+                      {d.incident.dropped_rows}{" "}
+                      {t(
+                        "deduplicated rows omitted from model context. Original evidence remains below.",
+                      )}
                     </div>
                   )}
                   {d.verdict.review_reason && (
@@ -1039,14 +1087,14 @@ function IncidentPage() {
                 {d.latest_run_id && <AgentFindings runId={d.latest_run_id} />}
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Evidence inventory</h2>
+                    <h2>{t("Evidence inventory")}</h2>
                     <span className="tag">
-                      {d.evidence.length} original alerts
+                      {d.evidence.length} {t("original alerts")}
                     </span>
                   </div>
                   {!d.evidence.length ? (
                     <div className="empty compact">
-                      Legacy evidence links unavailable.
+                      {t("Legacy evidence links unavailable.")}
                     </div>
                   ) : (
                     <div className="evidence-list">
@@ -1071,10 +1119,11 @@ function IncidentPage() {
                               {a.id} ·{" "}
                               {a.normalized.evidence.hostname ||
                                 a.normalized.evidence.src_ip ||
-                                "No host identity"}
+                                t("No host identity")}
                             </div>
                             <div className="sub">
-                              Grouped: {a.reason} · {stamp(a.received)}
+                              {t("Grouped:")}
+                              {a.reason} · {stamp(a.received)}
                             </div>
                           </div>
                           <Badge value={a.normalized.severity} />
@@ -1085,12 +1134,14 @@ function IncidentPage() {
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Investigation runs</h2>
-                    <span className="tag">Immutable evidence snapshots</span>
+                    <h2>{t("Investigation runs")}</h2>
+                    <span className="tag">
+                      {t("Immutable evidence snapshots")}
+                    </span>
                   </div>
                   {!d.runs.length ? (
                     <div className="empty compact">
-                      No run metadata exists for this legacy case.
+                      {t("No run metadata exists for this legacy case.")}
                     </div>
                   ) : (
                     d.runs.map((r) => (
@@ -1106,7 +1157,7 @@ function IncidentPage() {
                         <Badge value={r.status} />
                         <Badge value={r.replay ? "replay" : r.mode} />
                         <span className="small muted">
-                          {r.model || r.provider || "No provider data"}
+                          {r.model || r.provider || t("No provider data")}
                         </span>
                         {analyst && (
                           <button
@@ -1118,7 +1169,9 @@ function IncidentPage() {
                             onClick={() => {
                               if (
                                 confirm(
-                                  "Call the configured model again with this frozen evidence snapshot? Replay cannot execute a response.",
+                                  t(
+                                    "Call the configured model again with this frozen evidence snapshot? Replay cannot execute a response.",
+                                  ),
                                 )
                               )
                                 void write("/incidents/" + id + "/replay", {
@@ -1127,7 +1180,7 @@ function IncidentPage() {
                             }}
                           >
                             <Play size={13} />
-                            Replay
+                            {t("Replay")}
                           </button>
                         )}
                       </div>
@@ -1136,8 +1189,8 @@ function IncidentPage() {
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Analyst notes</h2>
-                    <span className="tag">Audited writes</span>
+                    <h2>{t("Analyst notes")}</h2>
+                    <span className="tag">{t("Audited writes")}</span>
                   </div>
                   <div className="notes">
                     {d.notes.length ? (
@@ -1151,7 +1204,7 @@ function IncidentPage() {
                         </article>
                       ))
                     ) : (
-                      <p className="muted">No notes have been added.</p>
+                      <p className="muted">{t("No notes have been added.")}</p>
                     )}
                     {analyst && (
                       <form
@@ -1162,17 +1215,21 @@ function IncidentPage() {
                           });
                         }}
                       >
-                        <label htmlFor="note">Add operational context</label>
+                        <label htmlFor="note">
+                          {t("Add operational context")}
+                        </label>
                         <textarea
                           id="note"
                           maxLength={8000}
                           required
                           value={note}
                           onChange={(e) => setNote(e.target.value)}
-                          placeholder="Record observations, decisions, or follow-up work…"
+                          placeholder={t(
+                            "Record observations, decisions, or follow-up work…",
+                          )}
                         />
                         <button disabled={busy} className="primary">
-                          Add note
+                          {t("Add note")}
                         </button>
                       </form>
                     )}
@@ -1182,27 +1239,37 @@ function IncidentPage() {
               <aside className="investigation-side">
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Response review</h2>
+                    <h2>{t("Response review")}</h2>
                     <ShieldCheck size={17} />
                   </div>
                   <div className="side-content">
-                    <label>Proposed target</label>
+                    <label>{t("Proposed target")}</label>
                     <div className="target mono">
-                      {d.target ?? "No eligible target"}
+                      {d.target ?? t("No eligible target")}
                     </div>
-                    <label>Action</label>
-                    <p>Block cited network source</p>
-                    <label>Response mode</label>
+                    <label>{t("Action")}</label>
+                    <p>{t("Block cited network source")}</p>
+                    <label>{t("Response mode")}</label>
                     <p>
                       <Badge value={d.response_mode} />
                     </p>
-                    <label>Current result</label>
+                    <label>{t("Current result")}</label>
                     <p>
                       <Badge value={d.status} />
                     </p>
+                    <label>{t("Proposal expires")}</label>
+                    <p>{stamp(d.proposal.expires)}</p>
+                    <p className="mono small">{d.proposal.id}</p>
+                    {d.status === "pending" &&
+                      d.proposal.ineligibility_reason && (
+                        <p className="small muted">
+                          {t(d.proposal.ineligibility_reason)}
+                        </p>
+                      )}
                     <p className="muted small">
-                      Target and eligibility are validated again on the server.
-                      SSH requires a live verdict and human approval.
+                      {t(
+                        "Target and eligibility are validated again on the server. SSH requires a live verdict and human approval.",
+                      )}
                     </p>
                     {approver && d.status === "pending" && (
                       <div className="response-buttons">
@@ -1212,7 +1279,9 @@ function IncidentPage() {
                           onClick={() => {
                             if (
                               confirm(
-                                "Approve this response under the configured mode?",
+                                t(
+                                  "Approve this response under the configured mode?",
+                                ),
                               )
                             )
                               void write("/incidents/" + id + "/response", {
@@ -1222,7 +1291,7 @@ function IncidentPage() {
                           }}
                         >
                           <Check size={15} />
-                          Approve response
+                          {t("Approve response")}
                         </button>
                         <button
                           disabled={busy}
@@ -1233,20 +1302,20 @@ function IncidentPage() {
                             })
                           }
                         >
-                          Reject
+                          {t("Reject")}
                         </button>
                       </div>
                     )}
                     {!approver && (
                       <p className="small muted">
-                        Approver permission is required to decide.
+                        {t("Approver permission is required to decide.")}
                       </p>
                     )}
                   </div>
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Entities</h2>
+                    <h2>{t("Entities")}</h2>
                   </div>
                   <div className="side-content entities">
                     {(d.incident.entities ?? d.incident.ips).map((e) => (
@@ -1258,17 +1327,17 @@ function IncidentPage() {
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Case integrations</h2>
+                    <h2>{t("Case integrations")}</h2>
                   </div>
                   <div className="side-content">
-                    <label>TheHive</label>
+                    <label>{t("TheHive")}</label>
                     <p>
                       {d.integrations?.thehive ? (
                         <>
                           <Badge value={d.integrations.thehive.state} />{" "}
                           <span className="mono">
                             {d.integrations.thehive.remote_id ??
-                              "No remote ID yet"}
+                              t("No remote ID yet")}
                           </span>
                         </>
                       ) : (
@@ -1278,7 +1347,7 @@ function IncidentPage() {
                     {d.integrations?.thehive?.error && (
                       <p className="warn">{d.integrations.thehive.error}</p>
                     )}
-                    <label>VirusTotal · public IP reputation</label>
+                    <label>{t("VirusTotal · public IP reputation")}</label>
                     {d.integrations?.virustotal.length ? (
                       d.integrations.virustotal.map((v) => (
                         <div className="job" key={v.ip}>
@@ -1286,8 +1355,10 @@ function IncidentPage() {
                           <Badge value={v.status} />
                           {v.report?.stats && (
                             <p>
-                              Malicious: {v.report.stats.malicious ?? 0} ·
-                              Suspicious: {v.report.stats.suspicious ?? 0}
+                              {t("Malicious:")}
+                              {v.report.stats.malicious ?? 0}{" "}
+                              {t("· Suspicious:")}
+                              {v.report.stats.suspicious ?? 0}
                             </p>
                           )}
                           {v.report && (
@@ -1299,48 +1370,55 @@ function IncidentPage() {
                         </div>
                       ))
                     ) : (
-                      <p className="muted small">No public IP lookup queued.</p>
+                      <p className="muted small">
+                        {t("No public IP lookup queued.")}
+                      </p>
                     )}
-                    <label>Shuffle response notifications</label>
+                    <label>{t("Shuffle response notifications")}</label>
                     {d.integrations?.shuffle.length ? (
                       d.integrations.shuffle.map((event) => (
                         <div className="job" key={event.id}>
                           <Badge value={event.status} />{" "}
-                          <span>Attempts: {event.attempts}</span>
+                          <span>
+                            {t("Attempts:")}
+                            {event.attempts}
+                          </span>
                           {event.error && <p className="warn">{event.error}</p>}
                         </div>
                       ))
                     ) : (
                       <p className="muted small">
-                        No approved response event queued.
+                        {t("No approved response event queued.")}
                       </p>
                     )}
                     <p className="muted small">
-                      Delivery status does not authorize or verify blocking. See
-                      Response history for the action result.
+                      {t(
+                        "Delivery status does not authorize or verify blocking. See Response history for the action result.",
+                      )}
                     </p>
                   </div>
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Job state</h2>
+                    <h2>{t("Job state")}</h2>
                   </div>
                   <div className="side-content">
                     {d.jobs.map((j) => (
                       <div className="job" key={j.id}>
                         <Badge value={j.status} />
                         <span>
-                          Attempt {j.attempts}/{j.max_attempts}
+                          {t("Attempt")}
+                          {j.attempts}/{j.max_attempts}
                         </span>
                         {j.error && <p className="warn">{j.error}</p>}
                       </div>
                     ))}
-                    {!d.jobs.length && <p>No job metadata</p>}
+                    {!d.jobs.length && <p>{t("No job metadata")}</p>}
                   </div>
                 </section>
                 <section className="panel">
                   <div className="panel-heading">
-                    <h2>Response history</h2>
+                    <h2>{t("Response history")}</h2>
                   </div>
                   <div className="side-content">
                     {d.actions.length ? (
@@ -1352,23 +1430,26 @@ function IncidentPage() {
                           </p>
                           <small>{stamp(a.ts)}</small>
                           <p className="muted small">
-                            Verification: {a.verification_status}
+                            {t("Verification:")}
+                            {a.verification_status}
                           </p>
                         </div>
                       ))
                     ) : (
-                      <p className="muted small">No response executed.</p>
+                      <p className="muted small">
+                        {t("No response executed.")}
+                      </p>
                     )}
                   </div>
                 </section>
                 {analyst && (
                   <section className="panel">
                     <div className="panel-heading">
-                      <h2>Workflow</h2>
+                      <h2>{t("Workflow")}</h2>
                     </div>
                     <div className="side-content">
                       <select
-                        aria-label="Update workflow"
+                        aria-label={t("Update workflow")}
                         value={d.workflow_status}
                         disabled={busy}
                         onChange={(e) =>
@@ -1381,7 +1462,9 @@ function IncidentPage() {
                       >
                         {["open", "investigating", "review", "closed"].map(
                           (s) => (
-                            <option key={s}>{s}</option>
+                            <option key={s} value={s}>
+                              {t(s)}
+                            </option>
                           ),
                         )}
                       </select>
@@ -1407,8 +1490,8 @@ function AgentFindings({ runId }: { runId: string }) {
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Net · Host · Judge</h2>
-        <span className="tag">Recorded role outcomes</span>
+        <h2>{t("Net · Host · Judge")}</h2>
+        <span className="tag">{t("Recorded role outcomes")}</span>
       </div>
       <div className="role-findings">
         {(
@@ -1430,15 +1513,15 @@ function AgentFindings({ runId }: { runId: string }) {
               ? (output as Record<string, unknown>)
               : undefined;
           const text = step?.error
-            ? "Analysis unavailable: " + step.error
+            ? t("Analysis unavailable: ") + step.error
             : value
               ? String(
                   value.finding ??
                     value.reason ??
-                    "No decision summary returned",
+                    t("No decision summary returned"),
                 )
               : query.error
-                ? "Data unavailable"
+                ? t("Data unavailable")
                 : "No recorded output yet";
           return (
             <article key={role}>
@@ -1452,7 +1535,8 @@ function AgentFindings({ runId }: { runId: string }) {
                 {step ? (
                   <>
                     <Badge value={step.mode} /> · {step.duration_ms.toFixed(0)}{" "}
-                    ms · {step.provider ?? "Provider not recorded"}
+                    {t("ms ·")}
+                    {step.provider ?? t("Provider not recorded")}
                   </>
                 ) : (
                   "Waiting for recorded step metadata"
@@ -1468,31 +1552,35 @@ function AgentFindings({ runId }: { runId: string }) {
 function RunModal({ run, close }: { run: Run; close: () => void }) {
   const query = useData<Run>("/runs/" + run.id);
   return (
-    <Modal title={"Investigation " + short(run.id)} onClose={close}>
+    <Modal title={t("Investigation ") + short(run.id)} onClose={close}>
       <State loading={query.loading && !query.data} error={query.error}>
         {query.data && (
           <>
             {!!run.replay && (
               <div className="notice">
-                Replay uses a frozen snapshot and cannot execute a response.
-                Model output may differ.
+                {t(
+                  "Replay uses a frozen snapshot and cannot execute a response. Model output may differ.",
+                )}
               </div>
             )}
             <div className="detail-meta">
               <Badge value={query.data.status} />
               <Badge value={query.data.mode} />
-              <span>Cutoff: {stamp(query.data.cutoff)}</span>
+              <span>
+                {t("Cutoff:")}
+                {stamp(query.data.cutoff)}
+              </span>
             </div>
             <div className="detail-meta">
               {query.data.planned_steps?.map((s) => (
                 <span key={s.id}>
-                  {s.role.toUpperCase()} <Badge value={s.status} /> ? attempt{" "}
-                  {s.attempt}
+                  {s.role.toUpperCase()} <Badge value={s.status} />{" "}
+                  {t("? attempt")} {s.attempt}
                 </span>
               ))}
             </div>
             <StepList items={query.data.steps ?? []} />
-            <h3>Final structured verdict</h3>
+            <h3>{t("Final structured verdict")}</h3>
             <Json value={query.data.verdict} />
           </>
         )}
@@ -1509,21 +1597,32 @@ function StepList({ items }: { items: Step[] }) {
             <span className="timeline-dot" />
             <strong>{s.tool_name ?? s.agent.toUpperCase()}</strong>
             <Badge value={s.status} />
-            <span className="mono small">{s.duration_ms.toFixed(0)} ms</span>
+            <span className="mono small">
+              {s.duration_ms.toFixed(0)} {t("ms")}
+            </span>
             <ChevronDown size={14} />
           </summary>
           <div className="step-content">
             <div className="detail-meta">
               <Badge value={s.mode} />
-              <span>Provider: {s.provider ?? "No data"}</span>
-              <span>Model: {s.model ?? "No data"}</span>
-              <span>Attempt: {s.attempt ?? "No data"}</span>
+              <span>
+                {t("Provider:")}
+                {s.provider ?? t("No data")}
+              </span>
+              <span>
+                {t("Model:")}
+                {s.model ?? t("No data")}
+              </span>
+              <span>
+                {t("Attempt:")}
+                {s.attempt ?? t("No data")}
+              </span>
             </div>
-            <h4>Guarded input</h4>
+            <h4>{t("Guarded input")}</h4>
             <Json value={s.prompt} />
-            <h4>Structured output</h4>
+            <h4>{t("Structured output")}</h4>
             <Json value={s.response} />
-            <h4>Usage / error</h4>
+            <h4>{t("Usage / error")}</h4>
             <Json
               value={{
                 usage: Object.keys(s.usage).length ? s.usage : null,
@@ -1550,28 +1649,32 @@ function LedgerPage() {
   return (
     <>
       <PageTitle
-        eyebrow="ACCOUNTABILITY"
-        title="Investigation ledger"
-        description="Guarded model inputs, bounded read-only tools, citations, and recorded outcomes."
+        eyebrow={t("ACCOUNTABILITY")}
+        title={t("Investigation ledger")}
+        description={t(
+          "Guarded model inputs, bounded read-only tools, citations, and recorded outcomes.",
+        )}
       >
         <Updated value={query.updated} error={query.error} />
       </PageTitle>
       <div className="filter-bar">
         <select
-          aria-label="Agent role filter"
+          aria-label={t("Agent role filter")}
           value={role}
           onChange={(e) => {
             setRole(e.target.value);
             setOffset(0);
           }}
         >
-          <option value="">All roles and tools</option>
+          <option value="">{t("All roles and tools")}</option>
           {["net", "host", "judge", "tool"].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
         <span className="muted small">
-          Missing legacy metadata is shown as no data.
+          {t("Missing legacy metadata is shown as no data.")}
         </span>
       </div>
       <section className="panel">
@@ -1586,12 +1689,12 @@ function LedgerPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Step / incident</th>
-                      <th>Agent or tool</th>
-                      <th>Provider / model</th>
-                      <th>Mode</th>
-                      <th>Duration</th>
-                      <th>Result</th>
+                      <th>{t("Step / incident")}</th>
+                      <th>{t("Agent or tool")}</th>
+                      <th>{t("Provider / model")}</th>
+                      <th>{t("Mode")}</th>
+                      <th>{t("Duration")}</th>
+                      <th>{t("Result")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1614,19 +1717,21 @@ function LedgerPage() {
                         <td>
                           {s.tool_name ?? s.agent.toUpperCase()}
                           <span className="sub">
-                            {s.prompt_version ?? "No version metadata"}
+                            {s.prompt_version ?? t("No version metadata")}
                           </span>
                         </td>
                         <td>
-                          {s.provider ?? "No data"}
+                          {s.provider ?? t("No data")}
                           <span className="sub mono">
-                            {s.model ?? "No model data"}
+                            {s.model ?? t("No model data")}
                           </span>
                         </td>
                         <td>
                           <Badge value={s.mode} />
                         </td>
-                        <td className="mono">{s.duration_ms.toFixed(0)} ms</td>
+                        <td className="mono">
+                          {s.duration_ms.toFixed(0)} {t("ms")}
+                        </td>
                         <td>
                           <Badge value={s.status} />
                         </td>
@@ -1642,13 +1747,14 @@ function LedgerPage() {
       </section>
       {selected && (
         <Modal
-          title={"Ledger step " + selected.id}
+          title={t("Ledger step ") + selected.id}
           onClose={() => setSelected(undefined)}
         >
           <StepList items={[selected]} />
           <p className="muted small">
-            Recorded {stamp(selected.ts)} · run{" "}
-            {selected.run_id ?? "No run metadata"}
+            {t("Recorded")}
+            {stamp(selected.ts)} {t("· run")}{" "}
+            {selected.run_id ?? t("No run metadata")}
           </p>
         </Modal>
       )}
@@ -1665,20 +1771,23 @@ function ResponsesPage() {
   return (
     <>
       <PageTitle
-        eyebrow="HUMAN IN THE LOOP"
-        title="Response review"
-        description="Review evidence and policy eligibility before deciding. No automatic execution."
+        eyebrow={t("HUMAN IN THE LOOP")}
+        title={t("Response review")}
+        description={t(
+          "Review evidence and policy eligibility before deciding. No automatic execution.",
+        )}
       >
         <span className="tag">
           <ShieldCheck size={14} />
-          Human approval required
+          {t("Human approval required")}
         </span>
       </PageTitle>
       <section className="panel">
         <div className="panel-heading">
-          <h2>Review queue</h2>
+          <h2>{t("Review queue")}</h2>
           <Link to="/console/incidents" className="text-link">
-            Full paginated queue <ArrowUpRight size={14} />
+            {t("Full paginated queue")}
+            <ArrowUpRight size={14} />
           </Link>
         </div>
         <State
@@ -1720,14 +1829,16 @@ function SystemPage() {
   return (
     <>
       <PageTitle
-        eyebrow="OPERATIONS"
-        title="System health"
-        description="Measured backend and worker state. Configuration does not imply connectivity."
+        eyebrow={t("OPERATIONS")}
+        title={t("System health")}
+        description={t(
+          "Measured backend and worker state. Configuration does not imply connectivity.",
+        )}
       >
         <Updated value={query.updated} error={query.error} />
         <button onClick={query.refresh}>
           <RefreshCw size={15} />
-          Refresh
+          {t("Refresh")}
         </button>
       </PageTitle>
       <State loading={!d && query.loading} error={!d ? query.error : undefined}>
@@ -1736,62 +1847,71 @@ function SystemPage() {
             <div className="health-grid">
               <section className="panel health-card">
                 <Database />
-                <h2>Database</h2>
+                <h2>{t("Database")}</h2>
                 <Badge value={d.database} />
-                <p>SQLite · durable local storage</p>
+                <p>{t("SQLite · durable local storage")}</p>
               </section>
               <section className="panel health-card">
                 <Activity />
-                <h2>Background worker</h2>
+                <h2>{t("Background worker")}</h2>
                 <Badge value={d.worker_fresh ? "active" : "stale"} />
                 <p>
-                  {d.backlog} queued/running jobs · {d.dead_letters} dead
-                  letters
+                  {d.backlog} {t("queued/running jobs ·")}
+                  {d.dead_letters} {t("dead letters")}
                 </p>
               </section>
               <section className="panel health-card">
                 <Network />
-                <h2>Wazuh source</h2>
+                <h2>{t("Wazuh source")}</h2>
                 <Badge value="not probed" />
-                <p>Last alert: {stamp(d.last_alert_at)}</p>
+                <p>
+                  {t("Last alert:")}
+                  {stamp(d.last_alert_at)}
+                </p>
               </section>
             </div>
             <div className="two-columns">
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>LLM provider</h2>
+                  <h2>{t("LLM provider")}</h2>
                   <Badge value={d.provider.mode} />
                 </div>
                 <dl>
-                  <dt>Provider</dt>
+                  <dt>{t("Provider")}</dt>
                   <dd>{d.provider.name}</dd>
-                  <dt>Configured</dt>
+                  <dt>{t("Configured")}</dt>
                   <dd>
-                    {d.provider.configured ? "Yes" : "No hosted configuration"}
+                    {d.provider.configured
+                      ? t("Yes")
+                      : t("No hosted configuration")}
                   </dd>
-                  <dt>Model</dt>
+                  <dt>{t("Model")}</dt>
                   <dd className="mono">
-                    {d.provider.model ?? "No model attribution (mock)"}
+                    {d.provider.model ?? t("No model attribution (mock)")}
                   </dd>
-                  <dt>Reachability</dt>
-                  <dd>Not actively probed</dd>
-                  <dt>Last call</dt>
+                  <dt>{t("Reachability")}</dt>
+                  <dd>{t("Not actively probed")}</dd>
+                  <dt>{t("Last call")}</dt>
                   <dd>{stamp(d.provider.last_call?.ts)}</dd>
-                  <dt>Last error</dt>
-                  <dd>{d.provider.last_call?.error ?? "No recorded error"}</dd>
-                  <dt>Response mode</dt>
+                  <dt>{t("Last error")}</dt>
+                  <dd>
+                    {d.provider.last_call?.error ?? t("No recorded error")}
+                  </dd>
+                  <dt>{t("Response mode")}</dt>
                   <dd>
                     <Badge value={d.response_mode} />
                   </dd>
-                  <dt>Demo isolation</dt>
+                  <dt>{t("Demo isolation")}</dt>
                   <dd>
-                    {d.demo ? "Synthetic demo database" : "Production database"}
+                    {d.demo
+                      ? t("Synthetic demo database")
+                      : t("Production database")}
                   </dd>
                 </dl>
               </section>
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>External integrations</h2>
+                  <h2>{t("External integrations")}</h2>
                 </div>
                 <div className="side-content">
                   {Object.entries(d.integrations ?? {}).map(
@@ -1799,41 +1919,43 @@ function SystemPage() {
                       <div className="job" key={name}>
                         <strong>
                           {name === "virustotal"
-                            ? "VirusTotal"
+                            ? t("VirusTotal")
                             : name === "thehive"
-                              ? "TheHive"
-                              : "Shuffle"}
+                              ? t("TheHive")
+                              : t("Shuffle")}
                         </strong>
                         <p>
                           {integration.active
-                            ? "Enabled"
+                            ? t("Enabled")
                             : integration.configured
-                              ? "Disabled in demo"
-                              : "Not configured"}
+                              ? t("Disabled in demo")
+                              : t("Not configured")}
                         </p>
                         <p className="muted small">
                           {Object.entries(integration.states)
                             .map(([state, count]) => state + ": " + count)
-                            .join(" · ") || "No queued work"}
+                            .join(" · ") || t("No queued work")}
                         </p>
                         {integration.errors > 0 && (
                           <p className="warn">
-                            {integration.errors} entries need retry or review
+                            {integration.errors}{" "}
+                            {t("entries need retry or review")}
                           </p>
                         )}
                       </div>
                     ),
                   )}
                   <p className="muted small">
-                    Configuration and queue state only; external reachability is
-                    not actively probed.
+                    {t(
+                      "Configuration and queue state only; external reachability is not actively probed.",
+                    )}
                   </p>
                 </div>
               </section>
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>Worker heartbeats</h2>
-                  <span className="tag">UTC storage</span>
+                  <h2>{t("Worker heartbeats")}</h2>
+                  <span className="tag">{t("UTC storage")}</span>
                 </div>
                 <div className="side-content">
                   {d.workers.length ? (
@@ -1843,21 +1965,21 @@ function SystemPage() {
                         <span>{stamp(w.last_seen)}</span>
                         <span className="muted">
                           {w.current_job
-                            ? "Processing " + short(w.current_job)
-                            : "Idle at last heartbeat"}
+                            ? t("Processing ") + short(w.current_job)
+                            : t("Idle at last heartbeat")}
                         </span>
                       </div>
                     ))
                   ) : (
                     <div className="empty compact">
-                      No heartbeat received. Start python -m src.worker.
+                      {t("No heartbeat received. Start python -m src.worker.")}
                     </div>
                   )}
                   <p className="muted small">
-                    Oldest active job:{" "}
+                    {t("Oldest active job:")}{" "}
                     {d.oldest_job_age_seconds === null
-                      ? "No jobs"
-                      : Math.floor(d.oldest_job_age_seconds) + " seconds"}
+                      ? t("No jobs")
+                      : Math.floor(d.oldest_job_age_seconds) + t(" seconds")}
                   </p>
                 </div>
               </section>
@@ -1865,12 +1987,12 @@ function SystemPage() {
             {actor.role === "admin" && (
               <section className="panel">
                 <div className="panel-heading">
-                  <h2>Create operator account</h2>
+                  <h2>{t("Create operator account")}</h2>
                   <UserRound size={16} />
                 </div>
                 <form className="user-form" onSubmit={user}>
                   <label>
-                    Username
+                    {t("Username")}
                     <input
                       name="username"
                       required
@@ -1879,7 +2001,7 @@ function SystemPage() {
                     />
                   </label>
                   <label>
-                    Password
+                    {t("Password")}
                     <input
                       name="password"
                       type="password"
@@ -1889,15 +2011,17 @@ function SystemPage() {
                     />
                   </label>
                   <label>
-                    Role
+                    {t("Role")}
                     <select name="role">
                       {["viewer", "analyst", "approver", "admin"].map((r) => (
-                        <option key={r}>{r}</option>
+                        <option key={r} value={r}>
+                          {t(r)}
+                        </option>
                       ))}
                     </select>
                   </label>
-                  <button className="primary">Create user</button>
-                  {notice && <p role="status">{notice}</p>}
+                  <button className="primary">{t("Create user")}</button>
+                  {notice && <p role="status">{t(notice)}</p>}
                 </form>
               </section>
             )}
@@ -1914,9 +2038,11 @@ function AuditPage() {
   return (
     <>
       <PageTitle
-        eyebrow="GOVERNANCE"
-        title="Audit log"
-        description="Who changed what, when, and with which recorded result."
+        eyebrow={t("GOVERNANCE")}
+        title={t("Audit log")}
+        description={t(
+          "Who changed what, when, and with which recorded result.",
+        )}
       >
         <Updated value={query.updated} error={query.error} />
       </PageTitle>
@@ -1932,11 +2058,11 @@ function AuditPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Timestamp</th>
-                      <th>Actor</th>
-                      <th>Operation</th>
-                      <th>Target</th>
-                      <th>Result</th>
+                      <th>{t("Timestamp")}</th>
+                      <th>{t("Actor")}</th>
+                      <th>{t("Operation")}</th>
+                      <th>{t("Target")}</th>
+                      <th>{t("Result")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1988,13 +2114,17 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
     <Session.Provider value={actor}>
       <div className="shell">
         <aside className="sidebar">
-          <Link to="/console" className="brand" aria-label="AgentSOC overview">
+          <Link
+            to="/console"
+            className="brand"
+            aria-label={t("AgentSOC overview")}
+          >
             <div className="brand-icon">
               <Shield size={22} />
             </div>
             <span>
               Agent<span className="brand-accent">SOC</span>
-              <small>SECURITY OPERATIONS</small>
+              <small>{t("SECURITY OPERATIONS")}</small>
             </span>
           </Link>
           <div className="workspace">
@@ -2002,21 +2132,22 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
               <Layers size={16} />
             </span>
             <div>
-              Operations workspace<small>Self-hosted console</small>
+              {t("Operations workspace")}
+              <small>{t("Self-hosted console")}</small>
             </div>
             <ChevronDown size={13} />
           </div>
-          <div className="nav-label">WORKSPACE</div>
-          <nav aria-label="Primary navigation">
+          <div className="nav-label">{t("WORKSPACE")}</div>
+          <nav aria-label={t("Primary navigation")}>
             {navigation.map(([label, to, Icon]) => (
               <NavLink
                 end={to === "/console"}
                 to={to}
                 key={to}
-                aria-label={label}
+                aria-label={t(label)}
               >
                 <Icon size={17} />
-                <span>{label}</span>
+                <span>{t(label)}</span>
                 {label === "Response review" && <span className="nav-dot" />}
               </NavLink>
             ))}
@@ -2028,12 +2159,12 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
               />
               <div>
                 {query.data?.demo
-                  ? "Synthetic demo"
+                  ? t("Synthetic demo")
                   : query.data?.worker_fresh
-                    ? "Worker active"
-                    : "Worker not verified"}
+                    ? t("Worker active")
+                    : t("Worker not verified")}
                 <small>
-                  {query.data?.response_mode ?? "Awaiting system state"}
+                  {t(query.data?.response_mode ?? "Awaiting system state")}
                 </small>
               </div>
             </div>
@@ -2043,7 +2174,7 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
               </span>
               <span>
                 {actor.username}
-                <small>{actor.role}</small>
+                <small>{t(actor.role)}</small>
               </span>
               <LogOut size={15} />
             </button>
@@ -2052,21 +2183,22 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
         <div className="content">
           <header className="topbar">
             <div>
-              <span className="muted">Workspace</span>
+              <span className="muted">{t("Workspace")}</span>
               <ChevronRight size={14} />
-              <span>{current}</span>
+              <span>{t(current)}</span>
             </div>
             <div>
+              <LanguageSwitcher />
               <span className="timezone">
                 <Clock size={13} />
                 {Intl.DateTimeFormat().resolvedOptions().timeZone}
               </span>
               <span className="top-divider" />
-              <span className="small muted">AgentSOC / v0.2</span>
+              <span className="small muted">{t("AgentSOC / v0.2")}</span>
             </div>
             <button
               className="mobile-logout"
-              aria-label="Sign out"
+              aria-label={t("Sign out")}
               onClick={logout}
             >
               <LogOut size={16} />
@@ -2087,23 +2219,27 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
                 path="*"
                 element={
                   <div className="empty">
-                    <h1>Page not found</h1>
-                    <Link to="/console">Return to overview</Link>
+                    <h1>{t("Page not found")}</h1>
+                    <Link to="/console">{t("Return to overview")}</Link>
                   </div>
                 }
               />
             </Routes>
             <footer>
-              AgentSOC · Evidence before action
-              <span>All timestamps displayed in your local timezone</span>
+              {t("AgentSOC · Evidence before action")}
+              <span>
+                {t("All timestamps displayed in your local timezone")}
+              </span>
             </footer>
           </main>
         </div>
+        <AssistantPanel />
       </div>
     </Session.Provider>
   );
 }
 function App() {
+  useLanguage();
   const [actor, setActor] = useState<Actor | null>(),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -2161,24 +2297,27 @@ function App() {
   if (!actor)
     return (
       <div className="login">
+        <LanguageSwitcher />
         <div className="login-brand">
           <Shield size={30} />
           <span>AgentSOC</span>
         </div>
         <section className="login-card">
-          <span className="eyebrow">SECURITY OPERATIONS WORKSPACE</span>
-          <h1>Welcome back.</h1>
-          <p>Sign in to investigate alerts and review response decisions.</p>
+          <span className="eyebrow">{t("SECURITY OPERATIONS WORKSPACE")}</span>
+          <h1>{t("Welcome back.")}</h1>
+          <p>
+            {t("Sign in to investigate alerts and review response decisions.")}
+          </p>
           <form onSubmit={login}>
-            <label htmlFor="username">Username</label>
+            <label htmlFor="username">{t("Username")}</label>
             <input
               id="username"
               name="username"
               required
               autoComplete="username"
-              placeholder="Your operator account"
+              placeholder={t("Your operator account")}
             />
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">{t("Password")}</label>
             <input
               id="password"
               name="password"
@@ -2188,23 +2327,23 @@ function App() {
             />
             {error && (
               <p role="alert" className="warn">
-                {error}
+                {t(error)}
               </p>
             )}
             <button className="primary" disabled={busy}>
-              {busy ? "Signing in…" : "Sign in to workspace"}
+              {busy ? t("Signing in…") : t("Sign in to workspace")}
               <ArrowUpRight size={16} />
             </button>
           </form>
           <div className="login-note">
             <ShieldCheck size={15} />
             <span>
-              Self-hosted · server-side session · human-approved response
+              {t("Self-hosted · server-side session · human-approved response")}
             </span>
           </div>
         </section>
         <p className="login-foot">
-          Evidence-driven operations. Every decision accountable.
+          {t("Evidence-driven operations. Every decision accountable.")}
         </p>
       </div>
     );

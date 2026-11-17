@@ -3,7 +3,6 @@ import html
 import json
 import logging
 import secrets
-import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -75,6 +74,9 @@ def create_app(settings=None, *, worker=None):
 
     app = FastAPI(title="AgentSOC", version="0.1.0", lifespan=lifespan)
     app.include_router(v1_router)
+    from src.api.assistant import router as assistant_router
+
+    app.include_router(assistant_router)
 
     @app.get("/live")
     def live():
@@ -328,39 +330,13 @@ def create_app(settings=None, *, worker=None):
         if request.headers.get("sec-fetch-site") == "cross-site":
             raise HTTPException(403)
         store = request.app.state.service.store
+        from src.approvals import decide
+
         case = store.get(cid)
         if not case:
             raise HTTPException(404)
-        if case["status"] != "pending":
-            raise HTTPException(409, "Case is no longer pending")
-        ip = None
-        if action == "approve":
-            try:
-                ip = response.candidate(case, config)
-            except ValueError as exc:
-                raise HTTPException(400, str(exc)) from None
-        if not store.claim(cid, actor="legacy-reviewer", mode=config.response_mode, action=action, ip=ip):
-            raise HTTPException(409, "Case is no longer pending")
-        status = "rejected"
-        if action == "approve":
-            try:
-                status = response.execute(ip, config)
-            except (OSError, TimeoutError, subprocess.TimeoutExpired):
-                status = "action_unknown"
-        store.record_action(cid, action, ip, config.response_mode, status)
-        log.info(
-            "review.completed",
-            extra={
-                "case_id": cid,
-                "details": {
-                    "action": action,
-                    "mode": config.response_mode,
-                    "status": status,
-                    "reviewer": "reviewer",
-                },
-            },
-        )
-        return {"id": cid, "status": status}
+        result = decide(store, config, cid, action, case["latest_run_id"], "legacy-reviewer")
+        return {"id": cid, **result}
 
     from pathlib import Path
 

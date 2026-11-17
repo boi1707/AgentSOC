@@ -80,6 +80,12 @@ export interface Incident {
   };
   verdict: Verdict;
   can_approve: boolean;
+  proposal: {
+    id: string;
+    expires: number;
+    eligible: boolean;
+    ineligibility_reason: string | null;
+  };
   target: string | null;
 }
 export interface Job {

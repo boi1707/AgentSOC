@@ -1,6 +1,7 @@
 .git
 .venv
 .env
+.ingest-key.pending
 .env.*
 data
 logs

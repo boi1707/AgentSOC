@@ -151,6 +151,7 @@ activemq-data/
 
 # Environments
 .env
+.ingest-key.pending
 .envrc
 .venv
 env/

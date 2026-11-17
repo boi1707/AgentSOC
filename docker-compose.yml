@@ -1,11 +1,13 @@
 services:
   agentsoc-backend:
+    image: ${AGENTSOC_IMAGE:-agentsoc:local}
     build: .
     ports:
       - "${BIND_IP:-127.0.0.1}:8000:8000"
     env_file: .env
     environment:
       EMBEDDED_WORKER: "0"
+      RESPONSE_MODE: "dry-run"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -28,11 +30,13 @@ services:
       timeout: 5s
       retries: 3
   agentsoc-worker:
+    image: ${AGENTSOC_IMAGE:-agentsoc:local}
     build: .
     command: ["python", "-m", "src.worker"]
     env_file: .env
     environment:
       EMBEDDED_WORKER: "0"
+      RESPONSE_MODE: "dry-run"
     volumes:
       - ./data:/app/data
     restart: unless-stopped

@@ -49,6 +49,10 @@ class Settings:
     vt_exclude_ips: tuple = ()
     vt_interval: float = 16
     vt_daily_limit: int = 500
+    shuffle_callback_secret: str = ""
+    telegram_users: dict = field(default_factory=dict)
+    telegram_notify_chats: tuple = ()
+    proposal_ttl: int = 86400
 
     @classmethod
     def from_env(cls):
@@ -93,6 +97,12 @@ class Settings:
             vt_exclude_ips=tuple(x.strip() for x in os.getenv("VT_EXCLUDE_IPS", "").split(",") if x.strip()),
             vt_interval=float(os.getenv("VT_REQUEST_INTERVAL", "16")),
             vt_daily_limit=int(os.getenv("VT_DAILY_LIMIT", "500")),
+            shuffle_callback_secret=os.getenv("SHUFFLE_CALLBACK_SECRET", ""),
+            telegram_users=json.loads(os.getenv("TELEGRAM_USERS", "{}")),
+            telegram_notify_chats=tuple(
+                x.strip() for x in os.getenv("TELEGRAM_NOTIFY_CHATS", "").split(",") if x.strip()
+            ),
+            proposal_ttl=int(os.getenv("PROPOSAL_TTL_SECONDS", "86400")),
         )
 
     @property
@@ -103,6 +113,7 @@ class Settings:
             for v in (
                 self.thehive_key,
                 self.vt_key,
+                self.shuffle_callback_secret,
                 self.shuffle_hook,
                 hook.path if self.shuffle_hook and len(hook.path) > 1 else "",
                 hook.query,
@@ -113,6 +124,25 @@ class Settings:
         )
 
     def validate(self):
+        if self.shuffle_callback_secret and len(self.shuffle_callback_secret) < 32:
+            raise ValueError("SHUFFLE_CALLBACK_SECRET requires at least 32 characters")
+        if self.shuffle_callback_secret and self.shuffle_callback_secret in (
+            self.ingest_key,
+            self.approve_key,
+            self.llm_key,
+            self.tg_token,
+            self.admin_password,
+        ):
+            raise ValueError("SHUFFLE_CALLBACK_SECRET must be an independent secret")
+        if not 60 <= self.proposal_ttl <= 86400:
+            raise ValueError("PROPOSAL_TTL_SECONDS must be 60..86400")
+        if not isinstance(self.telegram_users, dict) or any(
+            not re.fullmatch(r"[0-9]+", str(k)) or not isinstance(v, str) or not v
+            for k, v in self.telegram_users.items()
+        ):
+            raise ValueError("TELEGRAM_USERS must map numeric Telegram user IDs to local usernames")
+        if any(not re.fullmatch(r"-?[0-9]+", x) for x in self.telegram_notify_chats):
+            raise ValueError("TELEGRAM_NOTIFY_CHATS must contain numeric chat IDs")
         if self.shuffle_hook:
             hook = urlsplit(self.shuffle_hook)
             if (

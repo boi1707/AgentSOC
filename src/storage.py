@@ -139,9 +139,28 @@ class Store:
                 (json.dumps(verdict), json.dumps(restore), cid),
             )
 
-    def claim(self, cid, *, actor="legacy-reviewer", mode="dry-run", action="approve", ip=None):
+    def claim(
+        self,
+        cid,
+        *,
+        actor="legacy-reviewer",
+        mode="dry-run",
+        action="approve",
+        ip=None,
+        expected_run=None,
+        settings=None,
+    ):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if settings is not None:
+                from .approvals import validate
+
+                row = db.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
+                if not row:
+                    return False
+                case = self.decode(row)
+                run = db.execute("SELECT * FROM runs WHERE id=?", (case["latest_run_id"],)).fetchone()
+                ip = validate(case, dict(run) if run else None, expected_run, action, settings)
             changed = db.execute(
                 "UPDATE cases SET status='executing' WHERE id=? AND status='pending' AND workflow_status!='closed'",
                 (cid,),
@@ -183,10 +202,10 @@ class Store:
                     "INSERT INTO actions(ts,case_id,action,ip,mode,result,actor,completed_at) VALUES(?,?,?,?,?,?,?,?)",
                     (time.time(), cid, action, ip, mode, status, actor, time.time()),
                 )
-            if action == "approve":
+            if action in {"approve", "reject"}:
                 completed = db.execute(
-                    "SELECT * FROM actions WHERE case_id=? AND action='approve' AND result=? ORDER BY id DESC LIMIT 1",
-                    (cid, status),
+                    "SELECT * FROM actions WHERE case_id=? AND action=? AND result=? ORDER BY id DESC LIMIT 1",
+                    (cid, action, status),
                 ).fetchone()
                 self.queue_response(db, completed)
             db.execute("UPDATE thehive_sync SET available=0 WHERE case_id=?", (cid,))
@@ -204,7 +223,7 @@ class Store:
             "event": "response.completed",
             "case_id": action["case_id"],
             "action_id": action["id"],
-            "decision": "approve",
+            "decision": action["action"],
             "ip": action["ip"],
             "status": action["result"],
             "mode": action["mode"],
@@ -221,7 +240,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             recovering = db.execute(
-                "SELECT id FROM actions WHERE action='approve' AND result='executing'"
+                "SELECT id FROM actions WHERE result='executing'"
                 + (" AND (lease_until IS NULL OR lease_until<?)" if stale_only else ""),
                 (time.time(),) if stale_only else (),
             ).fetchall()
@@ -240,6 +259,13 @@ class Store:
             for row in recovering:
                 action = db.execute("SELECT * FROM actions WHERE id=?", (row["id"],)).fetchone()
                 if action["result"] == "action_unknown":
+                    if action["action"] == "reject":
+                        db.execute("UPDATE cases SET status='rejected' WHERE id=?", (action["case_id"],))
+                        db.execute(
+                            "UPDATE actions SET result='rejected',completed_at=? WHERE id=?",
+                            (time.time(), action["id"]),
+                        )
+                        action = db.execute("SELECT * FROM actions WHERE id=?", (row["id"],)).fetchone()
                     self.queue_response(db, action)
                     db.execute("UPDATE thehive_sync SET available=0 WHERE case_id=?", (action["case_id"],))
 
@@ -287,6 +313,8 @@ class Store:
         case = db.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
         if not case:
             raise KeyError(cid)
+        if parent is None and case["status"] == "executing":
+            raise ValueError("Response is executing")
         if parent is not None:
             original = db.execute("SELECT * FROM runs WHERE id=? AND case_id=?", (parent, cid)).fetchone()
             if not original:
@@ -391,7 +419,7 @@ class Store:
         for ip in public_ips(json.loads(row["incident"]).get("ips", [])):
             db.execute("INSERT OR IGNORE INTO vt_jobs(case_id,ip) VALUES(?,?)", (cid, ip))
 
-    def complete_job(self, job, verdict, restore):
+    def complete_job(self, job, verdict, restore, *, settings=None):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             current = db.execute(
@@ -413,6 +441,24 @@ class Store:
                     "UPDATE cases SET status='pending',workflow_status='review',verdict=?,restore=? WHERE id=?",
                     (json.dumps(verdict), json.dumps(restore), job["case_id"]),
                 )
+                case = self.decode(db.execute("SELECT * FROM cases WHERE id=?", (job["case_id"],)).fetchone())
+                if (
+                    settings
+                    and settings.shuffle_hook
+                    and settings.telegram_notify_chats
+                    and not settings.demo
+                    and not case["synthetic"]
+                ):
+                    from .notifications import proposal_event
+
+                    current_run = dict(
+                        db.execute("SELECT * FROM runs WHERE id=?", (job["run_id"],)).fetchone()
+                    )
+                    event = proposal_event(self, settings, case, run=current_run)
+                    db.execute(
+                        "INSERT OR IGNORE INTO notification_outbox(id,case_id,payload) VALUES(?,?,?)",
+                        (event["event_id"], case["id"], json.dumps(event)),
+                    )
             self.audit(job["owner"], "investigation.completed", job["run_id"], "completed", db=db)
             return True
 
