@@ -63,7 +63,7 @@ Provider configured không có nghĩa reachable; Wazuh không được gọi con
 | **Đã có trong source** | Assistant chỉ đọc với evidence citations; EN/VI; Telegram commands/inline buttons qua Shuffle; approval chung; notification outbox, retry và danh sách nhiều chat, gồm cấu hình hai chat. |
 | **Đã kiểm thử bằng mocks hoặc CI cách ly** | Quyền/HMAC/replay/race, hai notification recipients, Web/Telegram cùng trạng thái, dry-run; container Python 3.12, Backend/Worker cùng image, health, migration v2 và rollback bằng image cũ trên bản sao DB. Đây không phải live SOC E2E. |
 | **Cần xác minh live VPS/Shuffle/Telegram** | Image/configuration thực tế, WireGuard/Wazuh, provider live, TheHive/VirusTotal và workflow/bot thật; xác thực ingress, operator mapping, hai chat và durable delivery ledger phải được cấu hình, kiểm tra tại lab. |
-| **Kế hoạch tương lai** | pfSense live adapter, apply/verify block, tự gỡ sau 24 giờ và rollback firewall. Hiện chỉ có interface, kiểm tra kế hoạch và tài liệu thiết kế; **không có live pfSense blocking**. |
+| **Thành phần bắt buộc — chưa triển khai thực thi** | Tích hợp pfSense local để chặn IP nguồn sau Approve trên Web/Telegram, xác minh việc chặn, tự gỡ sau 24 giờ và gửi kết quả qua Shuffle. Hiện chỉ có interface, kiểm tra block plan và tài liệu thiết kế; **không có live pfSense blocking**. |
 
 Assistant truy xuất evidence Wazuh **đã ingest vào AgentSOC**, không truy vấn Wazuh manager trực tiếp.
 Endpoint hội thoại không có quyền approve/reject, chạy shell hay thực thi mitigation; mọi quyết định
@@ -196,6 +196,14 @@ retry SSH. `blocked` chưa có nghĩa đã verification nftables: verification_s
 Trong **`RESPONSE_MODE=dry-run`**, approval được lưu cùng kết quả mô phỏng `status=dry_run`,
 `blocked=false`, `verification_status=not_verified`; không gọi SSH hay sửa firewall. Compose chính
 giữ dry-run cho cả Backend/Worker. `LLM_MODE=live` chỉ cho phép phân tích, không cấp quyền blocking.
+
+### pfSense — Required Project Component (Implementation Pending)
+
+AgentSOC **bắt buộc tích hợp pfSense local** để chặn IP nguồn sau khi người vận hành Approve trên
+Web hoặc Telegram, xác minh việc chặn, tự động gỡ sau 24 giờ và gửi kết quả qua Shuffle.
+Hiện adapter chưa có chức năng thực thi; hệ thống tiếp tục giữ **Dry-Run** cho đến khi kiểm thử
+và được cấp phép kích hoạt.
+
 `PfSenseAdapter` hiện chỉ kiểm tra block plan và từ chối `block/remove`; không có live transport hoặc
 chế độ pfSense có thể bật. Thiết kế TTL 24 giờ chưa phải worker gỡ block đang hoạt động.
 
@@ -266,6 +274,7 @@ Chưa đo RAM/CPU/throughput được trên VPS đang chạy Wazuh, độ chính
 thật. Không dùng số mock làm số liệu đồ án. SQLite hiện dành cho một workspace; chưa SSO,
 multi-tenant hoặc audit chống sửa. Shuffle có durable notification outbox; Telegram trực tiếp chưa
 có spool/retry. Docker đã được xác minh trong CI cách ly; kết nối VPS/Wazuh/LLM live/Telegram thật
-vẫn cần kiểm tra ở môi trường tương ứng. pfSense live blocking chỉ là kế hoạch, không phải chức năng
-đã triển khai. Không bật SSH/pfSense hoặc deploy VPS tự động; không publish datastore.
+vẫn cần kiểm tra ở môi trường tương ứng. pfSense local là thành phần bắt buộc đang chờ triển khai
+thực thi, không phải chức năng chặn đã hoạt động. Giữ Dry-Run đến khi kiểm thử và được cấp phép;
+không bật SSH/pfSense hoặc deploy VPS tự động; không publish datastore.
 License của dependencies được giữ tại `/THIRD_PARTY_NOTICES.txt` trong console build.
