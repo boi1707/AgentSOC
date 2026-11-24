@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from src.agents import analyze
+from src.agents import SYSTEM, analyze
 from src.anon import Anon
 from src.incident import Grouper, norm
 from src.llm import LLM, Blocked
@@ -202,6 +202,61 @@ def test_downgrade_ungrounded_or_low_confidence(settings, confidence, ids):
     group.add(snort(), 0)
     verdict = analyze(group.ready(31)[0], Anon(), "c", fake)
     assert verdict["verdict"] == "review" and verdict["block_ip"] is None
+
+
+@pytest.mark.parametrize("cite_raw_ids", [False, True])
+def test_aggregated_alert_citations_remain_fail_closed(settings, cite_raw_ids):
+    group = Grouper()
+    for n in range(4):
+        group.add(snort(f"icmp-{n}"), n)
+
+    incident = group.ready(34)[0]
+    assert len(incident["raw_ids"]) == 4
+    assert len(incident["alerts"]) == 1
+    assert incident["alerts"][0]["count"] == 4
+
+    representative_id = incident["alerts"][0]["id"]
+
+    class Fake:
+        def __init__(self):
+            self.settings = settings
+            self.allowed_ids = None
+
+        def ask(self, anon, cid, role, system, payload, evidence_ids):
+            if role != "judge":
+                return {
+                    "finding": "Aggregated ICMP lab traffic",
+                    "evidence_ids": evidence_ids,
+                }
+
+            self.allowed_ids = list(evidence_ids)
+            return {
+                "verdict": "attack",
+                "confidence": 0.99,
+                "evidence_ids": (incident["raw_ids"] if cite_raw_ids else [representative_id]),
+                "block_ip": "192.168.20.50",
+            }
+
+    fake = Fake()
+    verdict = analyze(incident, Anon(), "test-case", fake)
+
+    assert fake.allowed_ids == [representative_id]
+
+    if cite_raw_ids:
+        assert verdict["verdict"] == "review"
+        assert verdict["grounded"] == 0.25
+        assert verdict["block_ip"] is None
+    else:
+        assert verdict["grounded"] == 1.0
+        assert verdict["evidence_ids"] == [representative_id]
+
+
+def test_judge_prompt_aggregated_citation_guidance():
+    prompt = SYSTEM["judge"]
+
+    assert "Cite only IDs explicitly listed in the supplied ids array" in prompt
+    assert "count is not a list of citable IDs" in prompt
+    assert "Do not cite other raw alert IDs unless they appear in ids" in prompt
 
 
 def test_live_failure_falls_back_to_review(settings):
