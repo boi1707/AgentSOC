@@ -34,6 +34,9 @@ SYSTEM = {
     "host": BASE + "Analyze endpoint alerts. Keys: finding (string), evidence_ids (array of strings), "
     "suspicious (boolean), candidate (null).",
     "judge": BASE + "Correlate network and endpoint findings with supplied evidence. "
+    "Cite only IDs explicitly listed in the supplied ids array. "
+    "Aggregated alerts may have count greater than 1; count is not a list of citable IDs. "
+    "Do not cite other raw alert IDs unless they appear in ids. "
     "Keys: verdict (attack|benign|review), confidence (0..1), evidence_ids (array), "
     "mitre (array), reason (string), block_ip (attacker source IP token or null). "
     "If evidence is missing or contradictory, use review and block_ip null.",
