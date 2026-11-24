@@ -1426,13 +1426,21 @@ function IncidentPage() {
                         <div className="job" key={a.id}>
                           <Badge value={a.result} />
                           <p>
-                            {a.actor || "Actor unavailable"} · {a.mode}
+                            {a.actor || t("Actor unavailable")} · {t(a.mode)}
                           </p>
                           <small>{stamp(a.ts)}</small>
                           <p className="muted small">
                             {t("Verification:")}
-                            {a.verification_status}
+                            {t(a.verification_status)}
                           </p>
+                          {a.managed_expires_at && (
+                            <p className="muted small">
+                              {t("Managed expiry")} · {stamp(a.managed_expires_at)}
+                            </p>
+                          )}
+                          {a.managed_error && (
+                            <p className="warn small">{t(a.managed_error)}</p>
+                          )}
                         </div>
                       ))
                     ) : (

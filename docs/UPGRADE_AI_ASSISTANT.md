@@ -172,32 +172,18 @@ formatting bounded plaintext messages. No importable native workflow export is c
 live Shuffle version and workflow schema were not available. Supply the private API address, webhook
 ingress protection, bot credentials, two chat IDs, enabled local accounts and synchronized clocks.
 
-## Future pfSense adapter design
+## pfSense read-only diagnostics and managed response simulation
 
-`ResponseAdapter` defines `block(BlockPlan)` and `remove(BlockPlan)`. The dry-run path uses
-`DryRunAdapter`. Existing SSH execution stays compatible. `PfSenseAdapter` validates plans and
-raises on both operations; it has no HTTP/SSH transport and is not selectable in settings.
-Its validation limits expiry to 24 hours and rejects protected/invalid addresses. The response policy
-must continue to establish that the IP is a cited source; adapter validation alone is insufficient.
+`PfSenseAdapter` validates plans and supports a separate operator-invoked HTTPS check for the
+configured alias, configuration apply status and runtime PF table membership. `block` and
+`remove` still raise, and settings reject live pfSense mode. Migration v3 supports transactionally
+queued approvals, restart recovery and expiry through an explicitly injected simulated transport.
+Normal runtime approval continues to use the existing dry-run or SSH paths.
 
-Before implementing a live adapter, identify pfSense version, supported management API/package,
-certificate requirements, routing, and whether observed source traffic actually traverses that firewall.
-Use an independently scoped least-privilege credential, trusted TLS and a reachable private management
-network. Never assume an installed API or disable certificate verification. Do not reuse ingestion keys.
-
-Persist a managed-block lease keyed by `(firewall_identity, proposal_id, source_ip)` with rule/alias handle,
-created time, expiry (`created + 86400`), desired/observed state and audit references. Use only a dedicated
-AgentSOC-managed alias/rule set. Deduplicate before applying, verify membership after apply, and report
-an unknown result on ambiguous network failure. Reconcile observed state before any retry.
-
-A restart-safe worker should claim due leases and call `remove` after 24 hours, verify absence and record
-the result with bounded retries. If multiple active proposals reference the same IP, remove the shared
-membership only when no unexpired lease remains. Alert on overdue removal or unreachable management;
-do not silently extend a block. Back up the specific managed configuration before change. Rollback
-removes only AgentSOC-owned membership using recorded handles, never flushes general firewall rules.
-Audit request, actor, evidence, apply/verify/remove outcomes and rollback. Lab tests must cover wrong
-routing, revoked credentials, partial application, restart, expiry and failed removal. Live implementation
-and activation require separate explicit authorization after dry-run and lab verification.
+The pinned pfREST v2.11.1 source uses positional alias identity for updates and a global filter apply.
+Scoped and concurrency-safe mutation remains a prerequisite for running the lifecycle against a
+real firewall. See [pfSense integration](PFSENSE_INTEGRATION.md) for
+the source audit, exact read contract, lab configuration and remaining acceptance gates.
 
 ## Validation commands and results
 
@@ -370,8 +356,9 @@ Recent means incident creation time, not activity on older incidents. Catalog fa
 unknown API text and technical values; future UI/API messages need matching translations. Original
 evidence, stored analysis and audit text intentionally retain their original language.
 
-pfSense connectivity, authentication, live apply/removal and automatic lease reconciliation are a
-design for the next authorized phase, not deployed functionality. Legacy direct Telegram delivery
+pfSense read-only HTTP diagnostics are available for separate lab verification. Automatic lease
+reconciliation and expiry have been tested in simulation. Live apply/removal remain pending.
+Legacy direct Telegram delivery
 does not gain the new durable outbox semantics; configure the Shuffle path for those guarantees.
 Native Shuffle workflows, trusted ingress, durable recipient deduplication and bot setup remain
 manual. No production readiness or actual external-service E2E success is claimed.

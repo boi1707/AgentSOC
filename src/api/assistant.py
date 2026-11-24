@@ -136,6 +136,7 @@ def dispatch(repo, settings, payload, user):
             "approve" if match[1] == "a" else "reject",
             run["id"],
             user["username"],
+            authenticated=True,
         )
     parts = payload.command.split()
     if not parts:
@@ -153,6 +154,7 @@ def dispatch(repo, settings, payload, user):
             "approve" if command == "/approve" else "reject",
             parts[2],
             user["username"],
+            authenticated=True,
         )
     if command == "/status":
         from src.api.v1 import health_snapshot

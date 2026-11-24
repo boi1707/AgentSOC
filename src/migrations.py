@@ -41,6 +41,38 @@ CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,username TEXT NO
 CREATE TABLE IF NOT EXISTS steps(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,role TEXT NOT NULL,status TEXT NOT NULL,attempt INTEGER NOT NULL,started REAL,finished REAL,error TEXT);
 """
 
+V3_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS managed_block_leases(
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL UNIQUE,
+      run_id TEXT NOT NULL REFERENCES runs(id),
+      case_id TEXT NOT NULL REFERENCES cases(id),
+      action_id INTEGER NOT NULL UNIQUE REFERENCES actions(id),
+      firewall_identity TEXT NOT NULL,
+      alias_identity TEXT NOT NULL,
+      source_ip TEXT NOT NULL,
+      approved_by TEXT NOT NULL,
+      created_at REAL NOT NULL,
+      activated_at REAL,
+      expires_at REAL,
+      desired_state TEXT NOT NULL CHECK(desired_state IN ('present', 'absent')),
+      observed_state TEXT NOT NULL DEFAULT 'unknown' CHECK(observed_state IN ('present', 'absent', 'unknown')),
+      ownership TEXT NOT NULL DEFAULT 'unknown' CHECK(ownership IN ('managed', 'external', 'unknown')),
+      ownership_marker TEXT,
+      execution_owner TEXT,
+      execution_lease_until REAL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at REAL NOT NULL,
+      last_error TEXT,
+      last_verified_at REAL,
+      CHECK ((activated_at IS NULL AND expires_at IS NULL) OR
+             (activated_at IS NOT NULL AND expires_at IS NOT NULL AND expires_at > activated_at))
+    )""",
+    "CREATE INDEX IF NOT EXISTS managed_blocks_due ON managed_block_leases(desired_state, next_retry_at, expires_at)",
+    """CREATE INDEX IF NOT EXISTS managed_blocks_membership
+       ON managed_block_leases(firewall_identity, alias_identity, source_ip, expires_at)""",
+)
+
 
 def migrate(db, *, host_ips=None):
     try:
@@ -140,4 +172,20 @@ def _apply(db, *, host_ips=None):
             )
     db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (time.time(),))
     db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(2,?)", (time.time(),))
+    for statement in V3_STATEMENTS:
+        db.execute(statement)
+    lease_columns = {row[1] for row in db.execute("PRAGMA table_info(managed_block_leases)")}
+    for name, definition in {
+        "activation_deadline": "REAL",
+        "block_ttl_seconds": "INTEGER",
+        "block_requested_at": "REAL",
+    }.items():
+        if name not in lease_columns:
+            db.execute(f"ALTER TABLE managed_block_leases ADD COLUMN {name} {definition}")
+    # An earlier development build could have sent a write once its own marker was saved.
+    db.execute(
+        """UPDATE managed_block_leases SET block_requested_at=created_at
+           WHERE block_requested_at IS NULL AND ownership_marker=id"""
+    )
+    db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (time.time(),))
     db.commit()

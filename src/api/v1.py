@@ -348,7 +348,18 @@ def incident_detail(cid: str, request: Request):
             dict(r) for r in db.execute("SELECT * FROM notes WHERE case_id=? ORDER BY created,id", (cid,))
         ]
         result["actions"] = [
-            dict(r) for r in db.execute("SELECT * FROM actions WHERE case_id=? ORDER BY ts DESC,id", (cid,))
+            dict(r)
+            for r in db.execute(
+                """SELECT a.*,l.activated_at AS managed_activated_at,
+                          CASE WHEN l.block_requested_at IS NOT NULL AND l.block_ttl_seconds IS NOT NULL
+                               THEN min(COALESCE(l.expires_at,l.block_requested_at+l.block_ttl_seconds),
+                                        l.block_requested_at+l.block_ttl_seconds)
+                               ELSE l.expires_at END AS managed_expires_at,
+                          l.last_error AS managed_error
+                   FROM actions a LEFT JOIN managed_block_leases l ON l.action_id=a.id
+                   WHERE a.case_id=? ORDER BY a.ts DESC,a.id""",
+                (cid,),
+            )
         ]
         result["jobs"] = [
             dict(r)
@@ -474,7 +485,13 @@ def review(cid: str, payload: Review, request: Request, actor=Depends(auth.requi
     from src.approvals import decide
 
     return decide(
-        store(request), request.app.state.settings, cid, payload.decision, payload.run_id, actor.username
+        store(request),
+        request.app.state.settings,
+        cid,
+        payload.decision,
+        payload.run_id,
+        actor.username,
+        authenticated=True,
     )
 
 

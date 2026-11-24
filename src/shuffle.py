@@ -6,6 +6,8 @@ import time
 
 import httpx
 
+from .managed_response import LOCAL_ONLY_AVAILABLE, MODE
+
 log = logging.getLogger("agentsoc.shuffle")
 
 
@@ -22,13 +24,24 @@ def _deliver(store, settings, table, *, transport=None):
     with store.connect() as db:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute(
-            f"SELECT * FROM {table} WHERE status NOT IN ('delivered','dead_letter') AND available<=? "
+            f"SELECT * FROM {table} WHERE status NOT IN ('delivered','dead_letter','local_only') AND available<=? "
             "AND lease_until<=? ORDER BY available,id LIMIT 1",
             (now, now),
         ).fetchone()
         if not row:
             return
         payload = json.loads(row["payload"])
+        proposal = payload.get("proposal")
+        if (
+            payload.get("simulated") is True
+            or payload.get("mode") == MODE
+            or (isinstance(proposal, dict) and proposal.get("mode") == MODE)
+        ):
+            db.execute(
+                f"UPDATE {table} SET status='local_only',available=?,lease_until=0 WHERE id=?",
+                (LOCAL_ONLY_AVAILABLE, row["id"]),
+            )
+            return
         # Persist the recipient snapshot before I/O; retries retain the same delivery identities.
         payload.setdefault("notification_recipients", list(settings.telegram_notify_chats))
         db.execute(

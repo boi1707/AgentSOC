@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .adapters.wazuh import normalize
+from .managed_response import LOCAL_ONLY_AVAILABLE
+from .managed_response import MODE as MANAGED_MODE
 from .migrations import migrate
 from .virustotal import public_ips
 
@@ -26,6 +28,7 @@ CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(case_id, received);
 class Store:
     def __init__(self, path, *, host_ips=None):
         self.path = path
+        self.managed = None
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -149,9 +152,12 @@ class Store:
         ip=None,
         expected_run=None,
         settings=None,
+        authenticated=False,
     ):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            managed = mode == MANAGED_MODE and action == "approve"
+            now = self.managed.clock() if managed and self.managed else time.time()
             if settings is not None:
                 from .approvals import validate
 
@@ -160,32 +166,53 @@ class Store:
                     return False
                 case = self.decode(row)
                 run = db.execute("SELECT * FROM runs WHERE id=?", (case["latest_run_id"],)).fetchone()
-                ip = validate(case, dict(run) if run else None, expected_run, action, settings)
+                ip = validate(case, dict(run) if run else None, expected_run, action, settings, now=now)
+            if managed:
+                from fastapi import HTTPException
+
+                if (
+                    not self.managed
+                    or not self.managed.accepting
+                    or not authenticated
+                    or settings is None
+                    or not self.managed.authorized(db, actor)
+                ):
+                    raise HTTPException(403, "Managed response requires an enabled named approver")
+                try:
+                    self.managed.validate_evidence(db, case, run, ip)
+                except (ValueError, KeyError, TypeError, IndexError, AttributeError):
+                    raise HTTPException(400, "Case is not eligible under managed response policy") from None
+            status = "pending_execution" if managed else "executing"
             changed = db.execute(
-                "UPDATE cases SET status='executing' WHERE id=? AND status='pending' AND workflow_status!='closed'",
-                (cid,),
+                "UPDATE cases SET status=? WHERE id=? AND status='pending' AND workflow_status!='closed'",
+                (status, cid),
             ).rowcount
             if not changed:
                 return False
             case = self.decode(db.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone())
-            run = db.execute("SELECT requested_by FROM runs WHERE id=?", (case["latest_run_id"],)).fetchone()
-            db.execute(
-                "INSERT INTO actions(ts,case_id,action,ip,mode,result,actor,requested_by,evidence,run_id,lease_until,approved_by,rejected_by) VALUES(?,?,?,?,?,'executing',?,?,?,?,?,?,?)",
+            requester = db.execute(
+                "SELECT requested_by FROM runs WHERE id=?", (case["latest_run_id"],)
+            ).fetchone()
+            intent = db.execute(
+                "INSERT INTO actions(ts,case_id,action,ip,mode,result,actor,requested_by,evidence,run_id,lease_until,approved_by,rejected_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    time.time(),
+                    now,
                     cid,
                     action,
                     ip,
                     mode,
+                    status,
                     actor,
-                    run[0] if run else None,
+                    requester[0] if requester else None,
                     json.dumps(case["verdict"].get("evidence_ids", [])),
                     case["latest_run_id"],
-                    time.time() + 60,
+                    None if managed else now + 60,
                     actor if action == "approve" else None,
                     actor if action == "reject" else None,
                 ),
             )
+            if managed:
+                self.managed.queue(db, case, run, intent.lastrowid, ip, actor, now)
             self.audit(actor, "response." + action, cid, "claimed", db=db)
             return True
 
@@ -217,6 +244,7 @@ class Store:
         if not case or case["synthetic"]:
             return
         event_id = uuid.uuid4().hex
+        simulated = action["mode"] == MANAGED_MODE
         event = {
             "schema_version": 1,
             "event_id": event_id,
@@ -228,34 +256,48 @@ class Store:
             "status": action["result"],
             "mode": action["mode"],
             "blocked": action["result"] == "blocked" and action["mode"] == "ssh",
-            "verification_status": "not_verified",
+            "verification_status": action["verification_status"],
             "completed_at": action["completed_at"],
         }
+        if simulated:
+            event.update(simulated=True, traffic_verified=False)
         db.execute(
-            "INSERT OR IGNORE INTO shuffle_outbox(id,action_id,case_id,payload) VALUES(?,?,?,?)",
-            (event_id, action["id"], action["case_id"], json.dumps(event)),
+            """INSERT OR IGNORE INTO shuffle_outbox(id,action_id,case_id,payload,status,available)
+               VALUES(?,?,?,?,?,?)""",
+            (
+                event_id,
+                action["id"],
+                action["case_id"],
+                json.dumps(event),
+                "local_only" if simulated else "pending",
+                LOCAL_ONLY_AVAILABLE if simulated else 0,
+            ),
         )
 
     def recover(self, *, stale_only=False):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             recovering = db.execute(
-                "SELECT id FROM actions WHERE result='executing'"
+                "SELECT id FROM actions WHERE result='executing' AND mode!='managed-simulation'"
                 + (" AND (lease_until IS NULL OR lease_until<?)" if stale_only else ""),
                 (time.time(),) if stale_only else (),
             ).fetchall()
             if stale_only:
                 db.execute(
-                    "UPDATE cases SET status='action_unknown' WHERE status='executing' AND (id IN (SELECT case_id FROM actions WHERE result='executing' AND (lease_until IS NULL OR lease_until<?)) OR NOT EXISTS(SELECT 1 FROM actions a WHERE a.case_id=cases.id AND a.result='executing'))",
+                    "UPDATE cases SET status='action_unknown' WHERE status='executing' AND NOT EXISTS(SELECT 1 FROM managed_block_leases l WHERE l.case_id=cases.id AND l.run_id=cases.latest_run_id) AND (id IN (SELECT case_id FROM actions WHERE result='executing' AND (lease_until IS NULL OR lease_until<?)) OR NOT EXISTS(SELECT 1 FROM actions a WHERE a.case_id=cases.id AND a.result='executing'))",
                     (time.time(),),
                 )
                 db.execute(
-                    "UPDATE actions SET result='action_unknown' WHERE result='executing' AND (lease_until IS NULL OR lease_until<?)",
+                    "UPDATE actions SET result='action_unknown' WHERE result='executing' AND mode!='managed-simulation' AND (lease_until IS NULL OR lease_until<?)",
                     (time.time(),),
                 )
             else:
-                db.execute("UPDATE cases SET status='action_unknown' WHERE status='executing'")
-                db.execute("UPDATE actions SET result='action_unknown' WHERE result='executing'")
+                db.execute(
+                    "UPDATE cases SET status='action_unknown' WHERE status='executing' AND NOT EXISTS(SELECT 1 FROM managed_block_leases l WHERE l.case_id=cases.id AND l.run_id=cases.latest_run_id)"
+                )
+                db.execute(
+                    "UPDATE actions SET result='action_unknown' WHERE result='executing' AND mode!='managed-simulation'"
+                )
             for row in recovering:
                 action = db.execute("SELECT * FROM actions WHERE id=?", (row["id"],)).fetchone()
                 if action["result"] == "action_unknown":
@@ -456,8 +498,15 @@ class Store:
                     )
                     event = proposal_event(self, settings, case, run=current_run)
                     db.execute(
-                        "INSERT OR IGNORE INTO notification_outbox(id,case_id,payload) VALUES(?,?,?)",
-                        (event["event_id"], case["id"], json.dumps(event)),
+                        """INSERT OR IGNORE INTO notification_outbox(id,case_id,payload,status,available)
+                           VALUES(?,?,?,?,?)""",
+                        (
+                            event["event_id"],
+                            case["id"],
+                            json.dumps(event),
+                            "local_only" if event["proposal"]["mode"] == MANAGED_MODE else "pending",
+                            LOCAL_ONLY_AVAILABLE if event["proposal"]["mode"] == MANAGED_MODE else 0,
+                        ),
                     )
             self.audit(job["owner"], "investigation.completed", job["run_id"], "completed", db=db)
             return True
