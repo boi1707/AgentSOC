@@ -13,6 +13,15 @@ from .service import Service
 from .settings import Settings
 
 
+def poll(tick, stop, interval):
+    while not stop.is_set():
+        try:
+            tick()
+        except Exception:
+            logging.getLogger("agentsoc.worker").exception("worker.cycle_failed")
+        stop.wait(interval)
+
+
 def main():
     settings = Settings.from_env()
     settings.validate()
@@ -22,12 +31,13 @@ def main():
     stop = threading.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: stop.set())
-    while not stop.is_set():
-        try:
-            service.tick()
-        except Exception:
-            logging.getLogger("agentsoc.worker").exception("worker.cycle_failed")
-        stop.wait(settings.poll)
+    managed = threading.Thread(target=poll, args=(service.tick_managed, stop, settings.poll))
+    managed.start()
+    try:
+        poll(service.tick, stop, settings.poll)
+    finally:
+        stop.set()
+        managed.join()
 
 
 if __name__ == "__main__":

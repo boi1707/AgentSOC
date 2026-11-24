@@ -81,6 +81,7 @@ def sync_pending(store, settings, *, transport=None):
         db.execute("BEGIN IMMEDIATE")
         rows = db.execute(
             "SELECT case_id FROM thehive_sync WHERE available<=? AND lease_until<=? "
+            "AND NOT EXISTS(SELECT 1 FROM managed_block_leases l WHERE l.case_id=thehive_sync.case_id) "
             "ORDER BY available,case_id LIMIT 1",
             (now, now),
         ).fetchall()
@@ -88,9 +89,9 @@ def sync_pending(store, settings, *, transport=None):
             return
         row = rows[0]
         cid = row["case_id"]
+        case = store.decode(db.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone())
         db.execute("UPDATE thehive_sync SET lease_until=? WHERE case_id=?", (lease, cid))
         state = dict(db.execute("SELECT * FROM thehive_sync WHERE case_id=?", (cid,)).fetchone())
-    case = store.get(cid)
     from .integrations import incident_integrations
 
     case["virustotal"] = incident_integrations(store, cid)["virustotal"]

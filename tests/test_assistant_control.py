@@ -262,7 +262,7 @@ def test_two_recipients_pending_outbox_retry_and_dead_letter(console, settings):
 
 def test_pfsense_plan_is_disabled_and_expiration_guarded():
     adapter = PfSenseAdapter()
-    plan = BlockPlan("p1", "8.8.8.8", 86400, ("127.0.0.0/8",))
+    plan = BlockPlan("p1", "10.100.27.10", 86400, ("127.0.0.0/8",))
     adapter.validate_plan(plan, now=0)
     assert DryRunAdapter().block(plan) == "dry_run"
     assert DryRunAdapter().remove(plan) == "dry_run"
@@ -271,6 +271,8 @@ def test_pfsense_plan_is_disabled_and_expiration_guarded():
             operation(plan)
     for invalid in (
         replace(plan, source_ip="127.0.0.1"),
+        replace(plan, source_ip="10.100.27.11"),
+        replace(plan, source_ip="8.8.8.8"),
         replace(plan, expires_at=86401),
         replace(plan, expires_at=0),
     ):

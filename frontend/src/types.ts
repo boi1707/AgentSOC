@@ -107,6 +107,9 @@ export interface Action {
   actor: string | null;
   requested_by: string | null;
   verification_status: string;
+  managed_activated_at?: number | null;
+  managed_expires_at?: number | null;
+  managed_error?: string | null;
 }
 export interface Run {
   id: string;

@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+from contextlib import closing
 from pathlib import Path
 
 from scripts.migration_lab import assert_relationships, seed_v1, snapshot
@@ -322,7 +323,11 @@ def run(image, previous_image, report_path):
             docker("cp", backend + ":/app/data/migrated-copy.db", migrated_copy)
             assert_relationships(migrated_copy)
             migrated = snapshot(migrated_copy)
-            assert {r[0] for r in migrated["schema_migrations"]} == {1, 2}
+            assert {r[0] for r in migrated["schema_migrations"]} == {1, 2, 3}
+            assert migrated["managed_block_leases"] == []
+            with closing(sqlite3.connect(migrated_copy)) as db:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(managed_block_leases)")}
+            assert {"activation_deadline", "block_ttl_seconds", "block_requested_at"} <= columns
             assert len(migrated["actions"]) == len(original["actions"]) + 1
             assert not (data / "ssh-executed").exists()
             report["checks"]["runtime_and_dry_run"] = "PASS"

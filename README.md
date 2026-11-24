@@ -63,7 +63,7 @@ Provider configured không có nghĩa reachable; Wazuh không được gọi con
 | **Đã có trong source** | Assistant chỉ đọc với evidence citations; EN/VI; Telegram commands/inline buttons qua Shuffle; approval chung; notification outbox, retry và danh sách nhiều chat, gồm cấu hình hai chat. |
 | **Đã kiểm thử bằng mocks hoặc CI cách ly** | Quyền/HMAC/replay/race, hai notification recipients, Web/Telegram cùng trạng thái, dry-run; container Python 3.12, Backend/Worker cùng image, health, migration v2 và rollback bằng image cũ trên bản sao DB. Đây không phải live SOC E2E. |
 | **Cần xác minh live VPS/Shuffle/Telegram** | Image/configuration thực tế, WireGuard/Wazuh, provider live, TheHive/VirusTotal và workflow/bot thật; xác thực ingress, operator mapping, hai chat và durable delivery ledger phải được cấu hình, kiểm tra tại lab. |
-| **Thành phần bắt buộc — chưa triển khai thực thi** | Tích hợp pfSense local để chặn IP nguồn sau Approve trên Web/Telegram, xác minh việc chặn, tự gỡ sau 24 giờ và gửi kết quả qua Shuffle. Hiện chỉ có interface, kiểm tra block plan và tài liệu thiết kế; **không có live pfSense blocking**. |
+| **Thành phần bắt buộc — đã kiểm thử vòng đời bằng mô phỏng** | Vòng đời phê duyệt Web/Telegram, lease, chặn/gỡ tự động và kết quả đã được kiểm thử cục bộ bằng transport giả lập. pfSense thật vẫn chỉ đọc. |
 
 Assistant truy xuất evidence Wazuh **đã ingest vào AgentSOC**, không truy vấn Wazuh manager trực tiếp.
 Endpoint hội thoại không có quyền approve/reject, chạy shell hay thực thi mitigation; mọi quyết định
@@ -204,8 +204,11 @@ Web hoặc Telegram, xác minh việc chặn, tự động gỡ sau 24 giờ và
 Hiện adapter chưa có chức năng thực thi; hệ thống tiếp tục giữ **Dry-Run** cho đến khi kiểm thử
 và được cấp phép kích hoạt.
 
-`PfSenseAdapter` hiện chỉ kiểm tra block plan và từ chối `block/remove`; không có live transport hoặc
-chế độ pfSense có thể bật. Thiết kế TTL 24 giờ chưa phải worker gỡ block đang hoạt động.
+`PfSenseAdapter` kiểm tra block plan và hỗ trợ chẩn đoán chỉ đọc qua HTTPS, gồm cấu hình alias,
+trạng thái apply và membership trong bảng PF. Worker đã được kiểm thử với transport giả lập,
+bao gồm hết hạn lease và tự gỡ chặn sau TTL. Sự kiện mô phỏng chỉ lưu local. `block/remove`
+trên pfSense thật vẫn bị vô hiệu hóa.
+[Tài liệu tích hợp pfSense](docs/PFSENSE_INTEGRATION.md).
 
 ## Kiểm thử và vận hành
 

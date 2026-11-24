@@ -3,6 +3,7 @@ import html
 import json
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -23,7 +24,7 @@ from src.settings import Settings
 log = logging.getLogger("agentsoc.api")
 
 
-def create_app(settings=None, *, worker=None):
+def create_app(settings=None, *, worker=None, managed_transport=None, managed_clock=time.time):
     config = settings or Settings.from_env()
     worker = config.embedded_worker if worker is None else worker
     basic, bearer = HTTPBasic(auto_error=False), HTTPBearer(auto_error=False)
@@ -32,7 +33,7 @@ def create_app(settings=None, *, worker=None):
     async def lifespan(app):
         config.validate()
         configure_logging(config)
-        service = Service(config)
+        service = Service(config, managed_transport=managed_transport, managed_clock=managed_clock)
         service.store.recover(stale_only=True)
         app.state.service = service
         app.state.settings = config
@@ -52,10 +53,10 @@ def create_app(settings=None, *, worker=None):
         )
         stop = asyncio.Event()
 
-        async def run():
+        async def run(tick):
             while not stop.is_set():
                 try:
-                    await asyncio.to_thread(service.tick)
+                    await asyncio.to_thread(tick)
                 except Exception:
                     log.exception("worker.failed")
                 try:
@@ -63,13 +64,17 @@ def create_app(settings=None, *, worker=None):
                 except TimeoutError:
                     pass
 
-        task = asyncio.create_task(run()) if worker else None
+        tasks = (
+            [asyncio.create_task(run(tick)) for tick in (service.tick, service.tick_managed)]
+            if worker
+            else []
+        )
         try:
             yield
         finally:
             stop.set()
-            if task:
-                await task
+            if tasks:
+                await asyncio.gather(*tasks)
             log.info("service.stopped")
 
     app = FastAPI(title="AgentSOC", version="0.1.0", lifespan=lifespan)

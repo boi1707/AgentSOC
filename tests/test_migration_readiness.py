@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from scripts.migration_lab import BASELINE, V2_TABLES, assert_relationships, seed_v1, snapshot
+from scripts.migration_lab import BASELINE, V2_TABLES, V3_TABLES, assert_relationships, seed_v1, snapshot
 from src.api.main import create_app
 from src.migrations import migrate
 from src.service import Service
@@ -30,10 +30,11 @@ def test_v1_migration_preserves_every_record_twice_and_relationships(tmp_path):
     assert V2_TABLES.isdisjoint(before)
     Store(path)
     first = snapshot(path)
-    assert set(first) == set(before) | V2_TABLES
+    assert set(first) == set(before) | V2_TABLES | V3_TABLES
+    assert first["managed_block_leases"] == []
     for table, rows in before.items():
         if table == "schema_migrations":
-            assert rows[0] in first[table] and {r[0] for r in first[table]} == {1, 2}
+            assert rows[0] in first[table] and {r[0] for r in first[table]} == {1, 2, 3}
         else:
             assert first[table] == rows, table
     Store(path)
@@ -42,6 +43,55 @@ def test_v1_migration_preserves_every_record_twice_and_relationships(tmp_path):
     # The historical schema has no declared foreign keys. Audit actual relationships too.
     with sqlite3.connect(path) as db:
         assert db.execute("PRAGMA foreign_key_list(incident_alerts)").fetchall() == []
+
+
+def test_existing_v2_records_are_preserved_and_v3_failure_rolls_back(tmp_path):
+    path = tmp_path / "v2.db"
+    seed_v1(path)
+    historical = tmp_path / "historical-v2"
+    historical.mkdir()
+    archive = subprocess.check_output(["git", "archive", "2a2c1f9", "src"])
+    with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+        source.extractall(historical, filter="data")
+    subprocess.run(
+        [sys.executable, "-c", "from src.storage import Store; import sys; Store(sys.argv[1])", str(path)],
+        cwd=historical,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("INSERT INTO callback_receipts VALUES('update-1', 1, 'test-digest', '{}')")
+        case_id = db.execute("SELECT id FROM cases ORDER BY id LIMIT 1").fetchone()[0]
+        db.execute(
+            "INSERT INTO notification_outbox(id,case_id,payload) VALUES('event-1',?, '{}')", (case_id,)
+        )
+    before = snapshot(path)
+    assert {row[0] for row in before["schema_migrations"]} == {1, 2}
+
+    class FailingV3Connection(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            if statement.startswith("CREATE INDEX IF NOT EXISTS managed_blocks_membership"):
+                raise sqlite3.OperationalError("Injected v3 index failure")
+            return super().execute(statement, *args, **kwargs)
+
+    with closing(sqlite3.connect(path, factory=FailingV3Connection)) as db:
+        db.row_factory = sqlite3.Row
+        with pytest.raises(sqlite3.OperationalError, match="Injected v3"):
+            migrate(db)
+        assert not db.in_transaction
+    assert snapshot(path) == before
+
+    Store(path)
+    migrated = snapshot(path)
+    assert set(migrated) - set(before) == V3_TABLES
+    assert migrated["managed_block_leases"] == []
+    assert {row[0] for row in migrated["schema_migrations"]} == {1, 2, 3}
+    assert set(before["schema_migrations"]).issubset(migrated["schema_migrations"])
+    for table in set(before) - {"schema_migrations"}:
+        assert migrated[table] == before[table], table
+    Store(path)
+    assert snapshot(path) == migrated
+    assert_relationships(path)
 
 
 def test_migrated_database_new_backend_and_worker(settings, tmp_path):

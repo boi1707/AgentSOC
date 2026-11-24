@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+import time
 import uuid
 
 import httpx
@@ -9,6 +10,7 @@ from .agents import analyze
 from .anon import Anon
 from .incident import Grouper
 from .llm import LLM
+from .managed_response import MODE, ManagedResponse
 from .shuffle import deliver_pending
 from .storage import Store
 from .thehive import sync_pending
@@ -20,12 +22,33 @@ log = logging.getLogger("agentsoc.service")
 
 
 class Service:
-    def __init__(self, settings):
+    def __init__(self, settings, *, managed_transport=None, managed_clock=time.time):
         self.settings = settings
         self.store = Store(settings.db, host_ips=settings.host_ips)
+        if managed_transport is not None:
+            if settings.response_mode != "dry-run" or settings.pfsense_live_enabled or settings.demo:
+                raise ValueError("Managed simulation requires a non-demo dry-run configuration")
+            self.store.managed = ManagedResponse(self.store, settings, managed_transport, clock=managed_clock)
         self.llm = LLM(settings, self.store)
         self.owner = uuid.uuid4().hex
         self.lock = threading.Lock()
+        self.managed_warning_at = 0
+
+    def tick_managed(self):
+        if self.store.managed is not None:
+            return self.store.managed.tick()
+        now = time.monotonic()
+        if now >= self.managed_warning_at:
+            self.managed_warning_at = now + 60
+            with self.store.connect() as db:
+                unresolved = db.execute(
+                    """SELECT count(*) FROM managed_block_leases l JOIN actions a ON a.id=l.action_id
+                       WHERE a.mode=? AND (l.next_retry_at>=0 OR a.result='unblock_failed')""",
+                    (MODE,),
+                ).fetchone()[0]
+            if unresolved:
+                log.warning("managed.execution_unavailable", extra={"details": {"unresolved": unresolved}})
+        return False
 
     def tick(self, now=None):
         with self.lock:
@@ -194,6 +217,9 @@ class Service:
             self.llm.run_id = None
 
     def notify(self, cid, verdict):
+        if self.store.managed is not None:
+            # The simulation proposal is already recorded by the transactional local outbox.
+            return
         if self.settings.shuffle_hook and self.settings.telegram_notify_chats:
             from .notifications import proposal_event
 

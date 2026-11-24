@@ -13,6 +13,7 @@ from src.storage import Store
 
 BASELINE = "0022d28"
 V2_TABLES = {"callback_receipts", "notification_outbox"}
+V3_TABLES = {"managed_block_leases"}
 
 
 def snapshot(path):

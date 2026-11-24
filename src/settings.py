@@ -8,6 +8,8 @@ from urllib.parse import parse_qsl, urlsplit
 
 from dotenv import load_dotenv
 
+from .response_adapters import PFSENSE_ALIAS, PFSENSE_LAB_TARGET, PFSENSE_MAX_TTL, PfSenseAdapter
+
 
 @dataclass
 class Settings:
@@ -53,6 +55,15 @@ class Settings:
     telegram_users: dict = field(default_factory=dict)
     telegram_notify_chats: tuple = ()
     proposal_ttl: int = 86400
+    pfsense_live_enabled: bool = False
+    pfsense_url: str = ""
+    pfsense_hostname: str = ""
+    pfsense_api_key_file: str = ""
+    pfsense_ca_file: str = ""
+    pfsense_alias: str = PFSENSE_ALIAS
+    pfsense_timeout: float = 5
+    pfsense_block_ttl: int = PFSENSE_MAX_TTL
+    pfsense_allowed_networks: tuple[str, ...] = (str(PFSENSE_LAB_TARGET),)
 
     @classmethod
     def from_env(cls):
@@ -103,6 +114,19 @@ class Settings:
                 x.strip() for x in os.getenv("TELEGRAM_NOTIFY_CHATS", "").split(",") if x.strip()
             ),
             proposal_ttl=int(os.getenv("PROPOSAL_TTL_SECONDS", "86400")),
+            pfsense_live_enabled=os.getenv("PFSENSE_LIVE_ENABLED", "0") != "0",
+            pfsense_url=os.getenv("PFSENSE_URL", ""),
+            pfsense_hostname=os.getenv("PFSENSE_HOSTNAME", ""),
+            pfsense_api_key_file=os.getenv("PFSENSE_API_KEY_FILE", ""),
+            pfsense_ca_file=os.getenv("PFSENSE_CA_FILE", ""),
+            pfsense_alias=os.getenv("PFSENSE_ALIAS", PFSENSE_ALIAS),
+            pfsense_timeout=float(os.getenv("PFSENSE_TIMEOUT", "5")),
+            pfsense_block_ttl=int(os.getenv("PFSENSE_BLOCK_TTL_SECONDS", str(PFSENSE_MAX_TTL))),
+            pfsense_allowed_networks=tuple(
+                value.strip()
+                for value in os.getenv("PFSENSE_ALLOWED_NETWORKS", str(PFSENSE_LAB_TARGET)).split(",")
+                if value.strip()
+            ),
         )
 
     @property
@@ -178,6 +202,9 @@ class Settings:
             raise ValueError("Set separate INGEST_KEY and APPROVE_KEY of at least 24 characters")
         if self.ingest_key == self.approve_key:
             raise ValueError("INGEST_KEY and APPROVE_KEY must be different")
+        if self.pfsense_live_enabled or self.response_mode == "pfsense":
+            raise ValueError("pfSense mutation is unavailable; keep PFSENSE_LIVE_ENABLED=0")
+        PfSenseAdapter.validate_settings(self)
         if self.llm_mode not in {"mock", "live"} or self.response_mode not in {"dry-run", "ssh"}:
             raise ValueError("Invalid LLM_MODE or RESPONSE_MODE")
         if self.llm_mode == "live":
