@@ -1374,6 +1374,33 @@ function IncidentPage() {
                         {t("No public IP lookup queued.")}
                       </p>
                     )}
+                    {!!d.integrations?.virustotal_hashes?.length && (
+                      <>
+                        <label>{t("File reputation (SHA256)")}</label>
+                        {d.integrations.virustotal_hashes.map((item) => (
+                          <div className="job" key={item.sha256}>
+                            <code className="json">{item.sha256}</code>{" "}
+                            <Badge value={item.status} />
+                            {item.report && (
+                              <p>
+                                {item.report.status} ·{" "}
+                                {stamp(item.report.queried_at)}
+                              </p>
+                            )}
+                            {item.report?.stats && (
+                              <p>
+                                {t("Malicious:")}{" "}
+                                {item.report.stats.malicious ?? 0}
+                              </p>
+                            )}
+                            {item.error && <p className="warn">{item.error}</p>}
+                            <small>
+                              {t("Missing reputation does not mean safe.")}
+                            </small>
+                          </div>
+                        ))}
+                      </>
+                    )}
                     <label>{t("Shuffle response notifications")}</label>
                     {d.integrations?.shuffle.length ? (
                       d.integrations.shuffle.map((event) => (
@@ -1435,7 +1462,8 @@ function IncidentPage() {
                           </p>
                           {a.managed_expires_at && (
                             <p className="muted small">
-                              {t("Managed expiry")} · {stamp(a.managed_expires_at)}
+                              {t("Managed expiry")} ·{" "}
+                              {stamp(a.managed_expires_at)}
                             </p>
                           )}
                           {a.managed_error && (

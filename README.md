@@ -174,7 +174,7 @@ Telegram, không SSH. Không seed trực tiếp case/verdict: fixture đi qua in
 | Dịch vụ | Vai trò | Cơ chế |
 | --- | --- | --- |
 | **TheHive** | Mirror case, verdict, evidence IDs và kết quả response | Queue SQLite, remote ID, đối soát tag và checkpoint cho POST chưa rõ kết quả. |
-| **VirusTotal** | Reputation bổ sung sau điều tra | Tối đa 3 public IP/incident, cache 24 giờ, quota bền vững; không tự sửa verdict/confidence. |
+| **VirusTotal** | Reputation bổ sung sau điều tra | Tối đa 3 public IP và tùy chọn 3 SHA256/incident; cache 24 giờ, quota chung bền vững; không tự sửa verdict/confidence. |
 | **Shuffle** | Thông báo proposal và kết quả Approve/Ignore; chuyển tiếp Telegram callback | Hai outbox SQLite, event ID và recipient snapshot cố định, lease/backoff/dead-letter; AgentSOC giữ quyền quyết định. |
 | **Telegram qua Shuffle** | Queries, Approve/Ignore buttons và commands cho operator được phép | HMAC callback, mapping Telegram user → local account/role; notification chat không tự có quyền approve. Hỗ trợ hai chat hoặc danh sách nhiều recipients. |
 
@@ -252,6 +252,23 @@ trên pfSense thật vẫn bị vô hiệu hóa.
 [Tài liệu tích hợp pfSense](docs/PFSENSE_INTEGRATION.md).
 
 ## Kiểm thử và vận hành
+
+### AI core evidence hardening — kiểm tra local ngày 26/11/2026
+
+Bổ sung bằng chứng Sysmon có allowlist, pseudonymization, phân biệt lịch sử với evidence
+hiện tại và kiểm tra supporting citations. Role rỗng được ghi `skipped`, không gọi provider.
+SHA256 reputation dùng GET-only, mặc định tắt (`VT_SHA256_ENABLED=0`), chia sẻ quota với IP.
+Migration v4 chỉ bổ sung bảng hash; không viết lại snapshot đã tồn tại.
+
+| Kiểm tra local trên nhánh `feat/ai-core-evidence-hardening` | Kết quả |
+| --- | --- |
+| Full backend pytest | **400 passed, 1 skipped** |
+| Ruff check / format | **PASS**, 73 Python files |
+| Frontend typecheck / lint / production build | **PASS** |
+| Browser E2E hiện có | **3 passed** |
+
+Đây là kết quả local với fixture/mocks, chưa có Docker/CI mới hoặc kiểm chứng VPS/live provider.
+Giữ dry-run và pfSense live tắt. [Báo cáo thay đổi, giới hạn và rollback](docs/AI_CORE_EVIDENCE_HARDENING.md).
 
 ### Assistant fix — kiểm tra local ngày 26/11/2026
 

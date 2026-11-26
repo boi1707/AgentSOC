@@ -7,7 +7,7 @@ Các tích hợp mặc định tắt. API key và URL webhook thật chỉ nằm
 
 1. Wazuh gửi alert vào inbox có xác thực của AgentSOC.
 2. Worker gom incident, chạy Net/Host/Judge và lưu kết quả + hàng đợi tích hợp trong cùng transaction SQLite.
-3. VirusTotal tra tối đa ba IP công cộng của incident. Kết quả reputation là thông tin bổ sung sau phân tích,
+3. VirusTotal tra tối đa ba IP công cộng và, khi opt-in, ba SHA256 của incident. Kết quả reputation là thông tin bổ sung sau phân tích,
    không tự thay verdict, tăng confidence hoặc cho phép chặn IP.
 4. TheHive nhận case, verdict, ID bằng chứng và kết quả VirusTotal đã có. Nếu VT về sau, worker cập nhật lại
    description của case. Chỉ phần nội dung mirror được quản lý, không import toàn bộ alert thô.
@@ -19,7 +19,7 @@ Các tích hợp mặc định tắt. API key và URL webhook thật chỉ nằm
 | --- | --- | --- |
 | TheHive | `THEHIVE_URL`, `THEHIVE_KEY` | Case ID AgentSOC, verdict, bằng chứng tham chiếu, trạng thái response, reputation VT |
 | Shuffle | `SHUFFLE_HOOK` | Event ID, Case ID, Action ID, IP mục tiêu, mode và kết quả response |
-| VirusTotal | `VT_KEY` | Chỉ IP công cộng; không gửi alert, file, domain, URL, user hoặc hostname |
+| VirusTotal | `VT_KEY`, `VT_SHA256_ENABLED=0` | IP công cộng; tùy chọn SHA256 64 hex qua GET file report. Không upload file hoặc gửi raw alert, domain, URL, user hay hostname |
 
 Replay không tạo công việc tích hợp mới. Demo mode không thực hiện network I/O của cả ba tích hợp,
 ngay cả khi có cấu hình từ môi trường. Case synthetic không được enqueue sang các tích hợp bên ngoài.
@@ -33,6 +33,7 @@ THEHIVE_URL=http://10.8.0.1:9000
 THEHIVE_KEY=
 SHUFFLE_HOOK=
 VT_KEY=
+VT_SHA256_ENABLED=0
 VT_EXCLUDE_IPS=160.250.132.244
 VT_REQUEST_INTERVAL=16
 VT_DAILY_LIMIT=500
@@ -45,6 +46,15 @@ VT_DAILY_LIMIT=500
   Giữ nguyên đường dẫn webhook; không dùng URL trang workflow hoặc API key người dùng thay cho webhook.
   URL có thể chứa credential; không chụp màn hình, log hoặc commit nó. Không cần key admin Shuffle trong AgentSOC.
 - VirusTotal: lấy API key của tài khoản phù hợp cho lab và điền `VT_KEY`. Để trống thì không tra.
+  SHA256 chỉ được gửi khi bật `VT_SHA256_ENABLED=1`; mặc định tắt. Hash là thông tin gửi
+  ra dịch vụ ngoài, cần phù hợp chính sách dữ liệu. Không upload file hoặc đường dẫn.
+
+IP và SHA256 dùng chung request interval, daily limit và cooldown bền vững; cache mỗi loại
+24 giờ. Migration v4 thêm `vt_hash_jobs` và `vt_hash_cache`, giữ nguyên queue/cache IP.
+Job hash có thể chờ khi chưa bật sender. API phân biệt `virustotal` (IP) với
+`virustotal_hashes` (SHA256); TheHive mirror và console hiển thị riêng. Kết quả unavailable
+hoặc not_found không có nghĩa file an toàn. Chi tiết kiểm tra/rollback:
+[AI core evidence hardening](AI_CORE_EVIDENCE_HARDENING.md).
   `VT_EXCLUDE_IPS` là danh sách IP công cộng phân cách bằng dấu phẩy mà bạn không muốn gửi ra ngoài,
   ví dụ IP VPS hoặc egress của tổ chức. IP private, VPN, loopback, link-local, multicast và reserved luôn bị bỏ qua.
 - Dùng HTTP ở mạng WireGuard/Docker tin cậy; dùng HTTPS khi đi qua mạng không tin cậy.

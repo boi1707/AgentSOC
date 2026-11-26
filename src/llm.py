@@ -21,6 +21,24 @@ class LLM:
         self.run_id = None
         self.attempt = 1
 
+    def skip(self, cid, role):
+        """Durable local finding, not a model call or a failed step."""
+        if not self.run_id:
+            return
+        with self.store.connect() as db:
+            changed = db.execute(
+                "UPDATE steps SET status='skipped',attempt=?,finished=?,error=NULL WHERE run_id=? AND role=? AND status='queued' AND attempt=0",
+                (self.attempt, time.time(), self.run_id, role),
+            ).rowcount
+            if not changed:
+                db.execute(
+                    "INSERT INTO steps(id,run_id,role,status,attempt,finished) VALUES(?,?,?,'skipped',?,?)",
+                    (uuid.uuid4().hex, self.run_id, role, self.attempt, time.time()),
+                )
+            self.store.audit(
+                "worker", "analysis.role_skipped", self.run_id, "no_current_" + role + "_evidence", db=db
+            )
+
     def ask(self, anon, cid, role, system, payload, evidence_ids):
         anon.secrets = tuple(
             set(
@@ -139,7 +157,7 @@ class LLM:
                         step_id,
                         "mock" if self.settings.llm_mode == "mock" else "openai-compatible",
                         actual_model,
-                        "net-host-judge-v2",
+                        "net-host-judge-v3",
                         self.attempt,
                         model_source,
                         json.dumps({"temperature": 0, "max_tokens": 2048, "max_prompt_bytes": 262144}),

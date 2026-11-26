@@ -422,5 +422,7 @@
   "Provider not recorded": "Chưa ghi nhận nhà cung cấp",
   "Analysis unavailable: ": "Phân tích không khả dụng: ",
   "Data unavailable": "Dữ liệu không khả dụng",
-  "Stored verdict": "Kết luận đã lưu"
+  "Stored verdict": "Kết luận đã lưu",
+  "File reputation (SHA256)": "Thông tin uy tín tệp (SHA256)",
+  "Missing reputation does not mean safe.": "Chưa có báo cáo uy tín không có nghĩa là an toàn."
 }

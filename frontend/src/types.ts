@@ -173,6 +173,17 @@ export interface IncidentIntegrations {
       queried_at: number;
     } | null;
   }[];
+  virustotal_hashes?: {
+    sha256: string;
+    indicator_type: "sha256";
+    status: string;
+    error: string | null;
+    report: {
+      status: string;
+      stats?: Record<string, number>;
+      queried_at: number;
+    } | null;
+  }[];
   shuffle: {
     id: string;
     status: string;

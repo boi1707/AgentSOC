@@ -11,7 +11,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from scripts.migration_lab import BASELINE, V2_TABLES, V3_TABLES, assert_relationships, seed_v1, snapshot
+from scripts.migration_lab import (
+    BASELINE,
+    V2_TABLES,
+    V3_TABLES,
+    V4_TABLES,
+    assert_relationships,
+    seed_v1,
+    snapshot,
+)
 from src.api.main import create_app
 from src.migrations import migrate
 from src.service import Service
@@ -30,11 +38,11 @@ def test_v1_migration_preserves_every_record_twice_and_relationships(tmp_path):
     assert V2_TABLES.isdisjoint(before)
     Store(path)
     first = snapshot(path)
-    assert set(first) == set(before) | V2_TABLES | V3_TABLES
+    assert set(first) == set(before) | V2_TABLES | V3_TABLES | V4_TABLES
     assert first["managed_block_leases"] == []
     for table, rows in before.items():
         if table == "schema_migrations":
-            assert rows[0] in first[table] and {r[0] for r in first[table]} == {1, 2, 3}
+            assert rows[0] in first[table] and {r[0] for r in first[table]} == {1, 2, 3, 4}
         else:
             assert first[table] == rows, table
     Store(path)
@@ -83,9 +91,9 @@ def test_existing_v2_records_are_preserved_and_v3_failure_rolls_back(tmp_path):
 
     Store(path)
     migrated = snapshot(path)
-    assert set(migrated) - set(before) == V3_TABLES
+    assert set(migrated) - set(before) == V3_TABLES | V4_TABLES
     assert migrated["managed_block_leases"] == []
-    assert {row[0] for row in migrated["schema_migrations"]} == {1, 2, 3}
+    assert {row[0] for row in migrated["schema_migrations"]} == {1, 2, 3, 4}
     assert set(before["schema_migrations"]).issubset(migrated["schema_migrations"])
     for table in set(before) - {"schema_migrations"}:
         assert migrated[table] == before[table], table

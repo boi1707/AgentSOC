@@ -48,6 +48,7 @@ class Settings:
     thehive_key: str = ""
     shuffle_hook: str = ""
     vt_key: str = ""
+    vt_sha256_enabled: bool = False
     vt_exclude_ips: tuple = ()
     vt_interval: float = 16
     vt_daily_limit: int = 500
@@ -105,6 +106,7 @@ class Settings:
             thehive_key=os.getenv("THEHIVE_KEY", ""),
             shuffle_hook=os.getenv("SHUFFLE_HOOK", ""),
             vt_key=os.getenv("VT_KEY", ""),
+            vt_sha256_enabled=os.getenv("VT_SHA256_ENABLED", "0") == "1",
             vt_exclude_ips=tuple(x.strip() for x in os.getenv("VT_EXCLUDE_IPS", "").split(",") if x.strip()),
             vt_interval=float(os.getenv("VT_REQUEST_INTERVAL", "16")),
             vt_daily_limit=int(os.getenv("VT_DAILY_LIMIT", "500")),

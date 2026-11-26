@@ -24,6 +24,9 @@ class MockProvider:
                 "mitre": [],
                 "reason": "MOCK fixture only; not a security assessment.",
                 "block_ip": net.get("candidate") if attack else None,
+                "supporting_evidence": data["ids"] if attack else [],
+                "contradicting_evidence": [],
+                "missing_data": [],
             }
         else:
             result = {

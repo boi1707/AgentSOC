@@ -422,5 +422,7 @@
   "Invalid JSON": "Invalid JSON",
   "Request unavailable": "Request unavailable",
   "Response state": "Response state",
-  "Proposal expires": "Proposal expires"
+  "Proposal expires": "Proposal expires",
+  "File reputation (SHA256)": "File reputation (SHA256)",
+  "Missing reputation does not mean safe.": "Missing reputation does not mean safe."
 }

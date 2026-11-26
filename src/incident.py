@@ -44,7 +44,20 @@ class Grouper:
         incident["last"] = now
         incident["hi"] |= row["level"] >= self.hi
         incident["raw_ids"].append(row["id"])
-        fingerprint = {k: v for k, v in row.items() if k not in {"id", "timestamp"}}
+        # Per-delivery record IDs/times do not split repeats of the same semantic event.
+        # Process GUIDs, targets, registry/DNS data and hashes remain discriminators.
+        fingerprint = {
+            k: v
+            for k, v in row.items()
+            if k
+            not in {
+                "id",
+                "timestamp",
+                "eventRecordID",
+                "systemTime",
+                "utcTime",
+            }
+        }
         key = sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()
         incident["rows"].setdefault(key, {**row, "count": 0})["count"] += 1
 

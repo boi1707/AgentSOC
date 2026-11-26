@@ -323,7 +323,7 @@ def run(image, previous_image, report_path):
             docker("cp", backend + ":/app/data/migrated-copy.db", migrated_copy)
             assert_relationships(migrated_copy)
             migrated = snapshot(migrated_copy)
-            assert {r[0] for r in migrated["schema_migrations"]} == {1, 2, 3}
+            assert {r[0] for r in migrated["schema_migrations"]} == {1, 2, 3, 4}
             assert migrated["managed_block_leases"] == []
             with closing(sqlite3.connect(migrated_copy)) as db:
                 columns = {row[1] for row in db.execute("PRAGMA table_info(managed_block_leases)")}

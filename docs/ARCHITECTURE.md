@@ -90,6 +90,13 @@ Prompt bị guard từ chối chỉ lưu placeholder. Prompt input tối đa 256
 summary, không yêu cầu hay mô phỏng internal chain-of-thought.
 
 Citation không hợp lệ ở Net/Host/Judge, thiếu evidence hoặc confidence thấp đều chuyển review.
+Judge tách `historical_context` khỏi current incident evidence; lịch sử không được dùng
+làm citation hiện tại. Attack cần `supporting_evidence` nhất quán với citation chính và
+finding suspicious hiện tại; missing/contradictory evidence chuyển review. `grounded`
+giữ citation ratio (`citation-ratio-v1`), không đo độ đúng của mọi phát biểu tự nhiên.
+Role không có evidence lưu step `skipped` và audit, không tạo ledger/provider usage giả.
+Evidence mới dùng normalized schema v2; snapshot cũ không bị viết lại.
+Xem [báo cáo AI core](AI_CORE_EVIDENCE_HARDENING.md) cho privacy, schema v4 và SHA256 queue.
 Provider/schema lỗi cũng chuyển review sau khi hết retry hoặc lỗi vĩnh viễn; không đổi thành benign.
 Pseudonymization vẫn là pattern/danh sách/token map, không phải chứng minh che mọi PII tùy ý.
 
