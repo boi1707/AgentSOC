@@ -230,6 +230,7 @@ class Service:
             stats = {
                 "status": "interrupted" if state == "collecting" else "disabled",
                 "queries": None if state == "collecting" else 0,
+                "retries": None if state == "collecting" else 0,
                 "retrieved": 0,
                 "duration_ms": None if state == "collecting" else 0,
             }
