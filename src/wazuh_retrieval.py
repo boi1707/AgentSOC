@@ -21,6 +21,7 @@ PROMPT_VERSION = "net-host-judge-v4"
 MAX_REQUEST = 4096
 MAX_RESPONSE = 512 * 1024
 MAX_CONTEXT = 48 * 1024
+RETRY_DELAYS = (0.75, 1.25)
 PROVIDER = "Microsoft-Windows-Sysmon"
 ALERT_ID = re.compile(r"[0-9]{1,20}\.[0-9]{1,24}")
 NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
@@ -42,6 +43,10 @@ FIELDS = [
 
 
 class RetrievalError(Exception):
+    pass
+
+
+class IndexerSearchTimeout(TimeoutError):
     pass
 
 
@@ -80,7 +85,7 @@ def validate_config(settings):
         and type(settings.wazuh_retrieval_max_alerts) is int
         and 1 <= settings.wazuh_retrieval_max_alerts <= 20
         and type(settings.wazuh_retrieval_max_queries) is int
-        and 1 <= settings.wazuh_retrieval_max_queries <= 3
+        and 1 <= settings.wazuh_retrieval_max_queries <= 4
     ):
         raise ValueError("Invalid Wazuh retrieval configuration")
 
@@ -242,7 +247,7 @@ async def _search(client, url, body, remaining, limit):
         payload = json.loads(chunks)
         hits = payload["hits"]["hits"]
         if payload.get("timed_out") is True:
-            raise TimeoutError
+            raise IndexerSearchTimeout
         terminated = payload.get("terminated_early", False)
         if (
             not isinstance(hits, list)
@@ -354,17 +359,36 @@ async def _collect(settings, transport, anchor, cutoff, primary, reserved_ids, b
         headers={"Accept-Encoding": "identity", "Content-Type": "application/json"},
     ) as client:
         async with asyncio.timeout_at(deadline):
-            for _ in range(min(2, settings.wazuh_retrieval_max_queries)):
+            retrying = False
+            while stats["queries"] < settings.wazuh_retrieval_max_queries:
                 limit = budget - stats["retrieved"]
                 if limit <= 0:
+                    stats["stop_reason"] = "result_budget"
                     break
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     raise TimeoutError
                 stats["queries"] += 1
+                if retrying:
+                    stats["retries"] += 1
                 hits = await _search(
                     client, url, _body(anchor, guid, lower, upper, limit, remaining), remaining, limit
                 )
+                if not hits and reason == "same_process_guid":
+                    retry_index = stats["retries"]
+                    if retry_index >= len(RETRY_DELAYS):
+                        stats["stop_reason"] = "retry_limit"
+                        break
+                    if stats["queries"] >= settings.wazuh_retrieval_max_queries:
+                        stats["stop_reason"] = "query_budget"
+                        break
+                    delay = RETRY_DELAYS[retry_index]
+                    if delay >= deadline - asyncio.get_running_loop().time():
+                        stats["stop_reason"] = "deadline_before_backoff"
+                        break
+                    await asyncio.sleep(delay)
+                    retrying = True
+                    continue
                 stats["retrieved"] += len(hits)
                 parent_candidates = {}
                 for hit in hits:
@@ -427,8 +451,12 @@ async def _collect(settings, transport, anchor, cutoff, primary, reserved_ids, b
                     }
                 if len(parent_candidates) != 1:
                     break
+                if stats["queries"] >= settings.wazuh_retrieval_max_queries:
+                    stats["stop_reason"] = "query_budget"
+                    break
                 next_parent = next(iter(parent_candidates.values()))
                 guid, reason = next_parent.parent, "parent_process_guid"
+                retrying = False
                 upper = min(upper, next_parent.timestamp)
                 system_end = min(system_end, next_parent.system_time or next_parent.timestamp)
     if asyncio.get_running_loop().time() >= deadline:
@@ -439,7 +467,14 @@ async def _collect(settings, transport, anchor, cutoff, primary, reserved_ids, b
 def retrieve(settings, candidates, primary, cutoff, slots, *, transport=None, reserved_ids=()):
     """Return sanitized metadata and normalized evidence, even when Indexer is unavailable."""
     start = time.monotonic()
-    stats = {"status": "no_eligible_anchor", "queries": 0, "retrieved": 0, "accepted": 0, "rejected": 0}
+    stats = {
+        "status": "no_eligible_anchor",
+        "queries": 0,
+        "retries": 0,
+        "retrieved": 0,
+        "accepted": 0,
+        "rejected": 0,
+    }
     rows, provenance = [], {}
     if not settings.wazuh_retrieval_enabled or settings.demo:
         return rows, provenance, {**stats, "status": "disabled", "duration_ms": 0, "correlation_reasons": []}
@@ -482,8 +517,14 @@ def retrieve(settings, candidates, primary, cutoff, slots, *, transport=None, re
             finally:
                 loop.close()
             stats["status"] = "matched" if rows else "no_match"
-    except (TimeoutError, httpx.TimeoutException):
-        stats.update(status="timeout", error="deadline_or_transport_timeout")
+    except (TimeoutError, httpx.TimeoutException) as exc:
+        if isinstance(exc, IndexerSearchTimeout):
+            reason = "server_timeout"
+        elif isinstance(exc, httpx.TimeoutException):
+            reason = "transport_timeout"
+        else:
+            reason = "deadline"
+        stats.update(status="timeout", error="deadline_or_transport_timeout", stop_reason=reason)
     except httpx.ConnectError as exc:
         cause = exc
         while cause is not None and not isinstance(cause, ssl.SSLError):

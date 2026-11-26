@@ -628,6 +628,7 @@ class Store:
                 stats = {
                     "status": "interrupted",
                     "queries": None,
+                    "retries": None,
                     "retrieved": 0,
                     "accepted": 0,
                     "rejected": 0,

@@ -15,7 +15,7 @@ The investigation worker can look up Sysmon process lineage when a forwarded ale
 | `WAZUH_RETRIEVAL_TIMEOUT_SECONDS` | `3` | Shared network deadline from 0.05 to 3 seconds. |
 | `WAZUH_RETRIEVAL_WINDOW_SECONDS` | `120` | From 1 to 120 seconds before the primary event. |
 | `WAZUH_RETRIEVAL_MAX_ALERTS` | `20` | From 1 to 20 returned records across queries, limited by the free slots under `CAP`. |
-| `WAZUH_RETRIEVAL_MAX_QUERIES` | `3` | From 1 to 3. The current lineage search performs at most two queries. |
+| `WAZUH_RETRIEVAL_MAX_QUERIES` | `3` | From 1 to 4. The same budget covers the initial search, retries and one parent lookup. |
 
 The worker sends only POST searches to the fixed `/wazuh-alerts-*/_search` endpoint and refuses partial results. It disables redirects and environment proxies, verifies TLS, and uses Basic authentication. A request is limited to 4 KiB and each uncompressed response to 512 KiB. The retained normalized context is limited to 48 KiB in addition to the existing prompt limits. Review the shipped mapping and verify your staging index uses compatible field types. [Wazuh 4.9 index template](https://raw.githubusercontent.com/wazuh/wazuh/v4.9.0/extensions/elasticsearch/7.x/wazuh-template.json)
 
@@ -23,7 +23,7 @@ The worker sends only POST searches to the fixed `/wazuh-alerts-*/_search` endpo
 
 1. A normal inbox alert triggers a case. The worker reserves retrieval for a new non-synthetic run, using only primary alert IDs from its initial snapshot and linked inbox rows for the configured `WAZUH_SOURCE_ID`.
 2. The worker selects the first eligible Sysmon anchor in snapshot order. It requires an original Wazuh alert ID, manager, agent ID and name, verified endpoint fields, a timezone-aware timestamp, and a valid process GUID. The fixed query uses those endpoint fields and seeks Sysmon Event ID 1 with the same GUID before or at the anchor time and within the run cutoff.
-3. The worker independently validates the index name, manager and endpoint, provider, time bounds, event ID and GUID of every hit. It can make one parent lookup when matching process creation evidence gives a consistent parent GUID. A primary Event ID 1 can supply the parent GUID directly. The parent cannot occur after the child, and the search never follows grandparents.
+3. A complete same-process response with zero hits can be retried after 750 ms and then 1,250 ms, within the shared deadline and query budget. The worker independently validates the index name, manager and endpoint, provider, time bounds, event ID and GUID of every hit. It can make one parent lookup when matching process creation evidence gives a consistent parent GUID and budget remains. A primary Event ID 1 can supply the parent GUID directly. The parent cannot occur after the child, and the search never follows grandparents.
 4. It deduplicates by Wazuh source and original alert ID before a row can supply a parent relationship. The run stores normalized rows in `indexer_context` and provenance in `indexer_provenance`. The current evidence tool combines them with the primary rows for analysis. The stored `alerts` list remains primary-only so the previous worker cannot mistake retrieved rows for primary evidence during rollback. Provenance includes source, index, endpoint, original ID, event time, retrieval time and correlation reason.
 5. Retrieval is finalized before the first analyst reads that run. The existing run JSON and audit log store the frozen snapshot and sanitized counters. A job lease and one-time reservation prevent stale workers from replacing it. Retries reuse finalized evidence. If a worker dies after reserving the lookup, recovery finalizes the primary snapshot as interrupted instead of making a fresh lookup. Replay copies the stored snapshot and cutoff and does not contact Indexer.
 
@@ -32,6 +32,8 @@ New retrieval-enabled runs record prompt version `net-host-judge-v4`. The Host A
 The Indexer response is projected to an explicit allowlist before normalization. Commands and descriptions remain untrusted log data, and the existing anonymization and egress guard apply before provider calls. Index and endpoint provenance is stored separately from the model payload. The client keeps connection material out of snapshots and errors, and drops contextual evidence that would fail the privacy preflight. Pattern-based redaction still has the limits of the existing privacy policy.
 
 No match, exhausted capacity, missing anchor, interrupted collection, authentication, rate limits, malformed or partial responses, timeout, TLS and connection errors have distinguishable outcomes. Failure uses the original primary evidence. No match can reflect ingestion lag, field mapping differences, an ineligible endpoint or the search bounds. It does not establish that a process event never happened. Duration, query and record counts, and accepted correlation reasons are stored independently of model timings.
+
+For same-process matches, the audit `retries` counter distinguishes an initial hit from a retry hit. A `stop_reason` of `query_budget` covers both a suppressed retry and a skipped parent lookup. `retry_limit` means both retries were used. `deadline_before_backoff` means the next wait would exceed the deadline, while `deadline` means the enclosing retrieval timeout expired. Server and HTTP transport timeouts have separate stop reasons.
 
 ## Future staging configuration
 
@@ -48,6 +50,8 @@ services:
       WAZUH_INDEXER_USERNAME: "agentsoc_reader"
       WAZUH_INDEXER_PASSWORD_FILE: "/run/agentsoc-indexer/password"
       WAZUH_INDEXER_CA_FILE: "/run/agentsoc-indexer/root-ca.pem"
+      WAZUH_RETRIEVAL_TIMEOUT_SECONDS: "3"
+      WAZUH_RETRIEVAL_MAX_QUERIES: "2"
       RESPONSE_MODE: "dry-run"
       PFSENSE_LIVE_ENABLED: "0"
       VT_SHA256_ENABLED: "0"
@@ -59,6 +63,8 @@ services:
 Grant the worker running as UID 10001 read access to only these two files. The existing production password at `/etc/agentsoc/wazuh-indexer/password` is root-owned with mode `0600` and stays in place. Have the authorized secret provisioner create a separate staging file owned by the worker's mapped UID with mode `0400`, or use a root-owned file with mode `0440` and a dedicated mapped group. Verify the effective GID before using group permissions and keep the parent credential directory restricted. Use a read-only staged copy of the root CA if the original file is inaccessible to the service account. Verify access from the non-root worker and keep the password out of Compose, environment variables and diagnostics. Mount no admin certificate or private key. The override needs no additional ports, privileges or Docker socket. The existing role need only search `wazuh-alerts-*`.
 
 Stage with a disposable database and sanitized alerts first. Check TLS identity and the exact search against the target Wazuh 4.9 mappings, then verify the two lineage links and the cutoff in the run snapshot. Measure worker timings under load and check that a temporary Indexer outage still completes investigations. To turn off retrieval, disable the worker flag and remove the two mounts in the staging override. There is no schema migration or historical snapshot rewrite. A rollback image check on a staging DB copy remains advisable before any production rollout.
+
+With the staging budget of two requests, a successful retry leaves no slot for the parent lookup. A separate staging run can set `WAZUH_RETRIEVAL_MAX_QUERIES=4` to allow two retries and a parent lookup within the same three-second deadline.
 
 ## Local implementation verification
 

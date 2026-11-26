@@ -91,7 +91,7 @@ def forbidden(_):
         ("wazuh_retrieval_timeout", float("nan")),
         ("wazuh_retrieval_window", 121),
         ("wazuh_retrieval_max_alerts", 21),
-        ("wazuh_retrieval_max_queries", 4),
+        ("wazuh_retrieval_max_queries", 5),
     ],
 )
 def test_config_fails_closed(config, key, value):
@@ -196,6 +196,79 @@ def test_out_of_scope_returned_hits_are_rejected(config, lineage, violation):
         target[key] = value
     rows, _, stats = lookup(config, lineage, lambda _: reply(hit(raw, index)))
     assert not rows and stats["status"] == "no_match" and stats["rejected"] == 1
+    assert stats["queries"] == 1 and stats["retries"] == 0
+
+
+@pytest.mark.parametrize(
+    ("budget", "misses", "requests", "retries", "accepted", "stop_reason"),
+    [
+        (2, 0, 2, 0, 2, None),
+        (2, 1, 2, 1, 1, "query_budget"),
+        (2, 2, 2, 1, 0, "query_budget"),
+        (3, 3, 3, 2, 0, "retry_limit"),
+        (4, 2, 4, 2, 2, None),
+        (4, 3, 3, 2, 0, "retry_limit"),
+    ],
+)
+def test_empty_same_process_retry_and_shared_query_budget(
+    config, lineage, monkeypatch, budget, misses, requests, retries, accepted, stop_reason
+):
+    queries, waits = [], []
+
+    async def sleep(delay):
+        waits.append(delay)
+
+    monkeypatch.setattr("src.wazuh_retrieval.asyncio.sleep", sleep)
+
+    def search(request):
+        queries.append(json.loads(request.content)["query"])
+        n = len(queries)
+        if n <= misses:
+            return reply()
+        return reply(hit(lineage["child" if n == misses + 1 else "parent"]))
+
+    _, _, stats = lookup(replace(config, wazuh_retrieval_max_queries=budget), lineage, search)
+    assert (len(queries), stats["queries"], stats["retries"], stats["accepted"]) == (
+        requests,
+        requests,
+        retries,
+        accepted,
+    )
+    assert stats.get("stop_reason") == stop_reason
+    assert waits == [0.75, 1.25][:retries]
+    assert queries[: retries + 1] == [queries[0]] * (retries + 1)
+    if accepted == 2:
+        assert queries[-1] != queries[0]
+
+
+def test_empty_result_does_not_wait_if_deadline_cannot_fit_backoff(config, lineage, monkeypatch):
+    async def sleep(_):
+        pytest.fail("retry must not sleep beyond the shared deadline")
+
+    monkeypatch.setattr("src.wazuh_retrieval.asyncio.sleep", sleep)
+    short = replace(config, wazuh_retrieval_timeout=0.5)
+    service = Service(short, indexer_transport=httpx.MockTransport(lambda _: reply()))
+    service.store.ingest(lineage["trigger"])
+    service.tick()
+    (case,) = service.store.cases()
+    run = service.store.get_run(case["latest_run_id"])
+    stats = run["evidence"]["indexer_retrieval"]
+    assert run["evidence"]["indexer_context"] == [] and stats["status"] == "no_match"
+    assert (stats["queries"], stats["retries"]) == (1, 0)
+    assert stats["stop_reason"] == "deadline_before_backoff"
+    with service.store.connect() as db:
+        (row,) = db.execute(
+            "SELECT result FROM audit WHERE action='evidence.indexer_retrieval' AND target=?", (run["id"],)
+        )
+    assert json.loads(row["result"]) == stats
+
+
+def test_parent_only_search_does_not_retry_zero_hits(config, lineage):
+    rows, _, stats = retrieve(
+        config, [lineage["child"]], (), time.time(), 20, transport=httpx.MockTransport(lambda _: reply())
+    )
+    assert not rows and stats["status"] == "no_match"
+    assert (stats["queries"], stats["retries"]) == (1, 0)
 
 
 def test_duplicate_identity_includes_wazuh_source(config, lineage):
@@ -405,6 +478,38 @@ def test_server_search_timeout(config, lineage):
     rows, _, stats = lookup(config, lineage, lambda _: reply(hit(lineage["child"]), timed_out=True))
     assert not rows and stats["status"] == "timeout"
     assert stats["error"] == "deadline_or_transport_timeout"
+    assert stats["stop_reason"] == "server_timeout"
+
+
+@pytest.mark.parametrize("phase", ["connect", "tls", "body"])
+def test_total_deadline_cancels_transport_even_if_each_phase_fits(config, lineage, phase):
+    entered = []
+
+    async def stage(name):
+        entered.append(name)
+        # Each wait is below the request's phase timeout. Cumulatively, the
+        # designated phase crosses the enclosing retrieval deadline.
+        await asyncio.sleep(0.35 if name == phase else 0.10)
+        if name == phase:
+            await asyncio.sleep(0.35)
+            pytest.fail("transport escaped the retrieval deadline")
+
+    class SlowBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            await stage("body")
+            yield b"{}"
+
+    async def search(request):
+        assert 0 < request.extensions["timeout"]["connect"] <= 0.5
+        assert 0 < request.extensions["timeout"]["read"] <= 0.5
+        await stage("connect")
+        await stage("tls")
+        return httpx.Response(200, stream=SlowBody())
+
+    rows, _, stats = lookup(replace(config, wazuh_retrieval_timeout=0.5), lineage, search)
+    assert not rows and entered[-1] == phase
+    assert stats["status"] == "timeout" and stats["stop_reason"] == "deadline"
+    assert (stats["queries"], stats["retries"]) == (1, 0)
 
 
 def test_streamed_body_size_limit_without_content_length(config, lineage):
@@ -477,14 +582,22 @@ def test_indexer_cannot_smuggle_nonallowlisted_fields_through_normalization(conf
     assert rows[0]["src_ip"] is None and "untrusted-extra" not in json.dumps(rows)
 
 
-def test_full_investigation_scoped_citations_privacy_and_replay(config, lineage):
+@pytest.mark.parametrize(("initial_miss", "budget", "accepted"), [(False, 2, 2), (True, 3, 2), (True, 2, 1)])
+def test_full_investigation_scoped_citations_privacy_and_replay(
+    config, lineage, initial_miss, budget, accepted
+):
     queries, prompts = [], []
 
     def indexer(request):
         queries.append(request)
-        return reply(hit(lineage["child"] if len(queries) == 1 else lineage["parent"]))
+        if initial_miss and len(queries) == 1:
+            return reply()
+        return reply(hit(lineage["child"] if len(queries) == 1 + initial_miss else lineage["parent"]))
 
-    service = Service(replace(config, llm_mode="live"), indexer_transport=httpx.MockTransport(indexer))
+    service = Service(
+        replace(config, llm_mode="live", wazuh_retrieval_max_queries=budget),
+        indexer_transport=httpx.MockTransport(indexer),
+    )
 
     def model(_url, **kwargs):
         messages = kwargs["json"]["messages"]
@@ -514,9 +627,12 @@ def test_full_investigation_scoped_citations_privacy_and_replay(config, lineage)
     case = service.store.cases()[0]
     run = service.store.get_run(case["latest_run_id"])
     snapshot = run["evidence"]
-    assert snapshot["alerts"] == case["incident"]["alerts"] and len(snapshot["indexer_context"]) == 2
+    assert snapshot["alerts"] == case["incident"]["alerts"] and len(snapshot["indexer_context"]) == accepted
     assert run["prompt_version"] == PROMPT_VERSION
-    assert snapshot["indexer_retrieval"]["accepted"] == 2 and len(snapshot["indexer_provenance"]) == 2
+    stats = snapshot["indexer_retrieval"]
+    assert stats["accepted"] == accepted and len(snapshot["indexer_provenance"]) == accepted
+    assert stats["status"] == "matched" and stats["retries"] == int(initial_miss) and len(prompts) == 2
+    assert stats.get("stop_reason") == ("query_budget" if accepted == 1 else None)
     verdict = case["verdict"]
     assert verdict["verdict"] == "review" and verdict["block_ip"] is None and verdict["grounded"] == 1
     assert set(verdict["evidence_ids"]) == snapshot["indexer_provenance"].keys()
@@ -543,13 +659,23 @@ def test_full_investigation_scoped_citations_privacy_and_replay(config, lineage)
         assert db.execute("SELECT count(*) FROM cases").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM actions").fetchone()[0] == 0
         assert db.execute("SELECT status FROM steps WHERE role='net'").fetchone()[0] == "skipped"
-        assert (
-            db.execute("SELECT count(*) FROM audit WHERE action='evidence.indexer_retrieval'").fetchone()[0]
-            == 1
+        (row,) = db.execute(
+            "SELECT result FROM audit WHERE action='evidence.indexer_retrieval' AND target=?", (run["id"],)
         )
+        assert json.loads(row["result"]) == stats
+        assert {
+            row["agent"]: row["n"]
+            for row in db.execute(
+                "SELECT agent, count(*) AS n FROM ledger WHERE run_id=? AND agent!='tool' GROUP BY agent",
+                (run["id"],),
+            )
+        } == {"host": 1, "judge": 1}
     replay = service.store.new_run(case["id"], parent=run["id"], settings=config)
     service.tick()
-    assert service.store.get_run(replay)["evidence"] == snapshot and len(queries) == 2
+    frozen_replay = service.store.get_run(replay)
+    assert frozen_replay["evidence"] == snapshot and frozen_replay["cutoff"] == run["cutoff"]
+    assert len(queries) == accepted + initial_miss
+    assert len(prompts) == 4
     assert service.store.get_run(replay)["status"] == "completed"
 
 
