@@ -243,17 +243,22 @@ async def _search(client, url, body, remaining, limit):
         hits = payload["hits"]["hits"]
         if payload.get("timed_out") is True:
             raise TimeoutError
-        failed = _obj(payload.get("_shards")).get("failed")
         terminated = payload.get("terminated_early", False)
         if (
             not isinstance(hits, list)
             or payload.get("timed_out") is not False
-            or type(failed) is not int
-            or failed < 0
             or type(terminated) is not bool
         ):
             raise ValueError
-        if failed or terminated:
+        shards = _obj(payload.get("_shards"))
+        counts = [shards[name] for name in ("total", "successful", "skipped", "failed")]
+        if any(type(count) is not int or count < 0 for count in counts):
+            raise ValueError
+        total, successful, skipped, failed = counts
+        # OpenSearch counts skipped shards within successful shards.
+        if skipped > successful or successful + failed > total:
+            raise ValueError
+        if failed or terminated or successful != total:
             raise RetrievalError("partial_response")
     except (ValueError, KeyError, TypeError, RecursionError):
         raise RetrievalError("malformed_response") from None

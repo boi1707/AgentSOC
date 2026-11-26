@@ -54,8 +54,13 @@ def hit(alert, index=INDEX):
     return {"_index": index, "_source": alert}
 
 
-def reply(*hits):
-    return httpx.Response(200, json={"timed_out": False, "_shards": {"failed": 0}, "hits": {"hits": hits}})
+COMPLETE_SHARDS = {"total": 3, "successful": 3, "skipped": 0, "failed": 0}
+
+
+def reply(*hits, **metadata):
+    return httpx.Response(
+        200, json={"timed_out": False, "_shards": COMPLETE_SHARDS, "hits": {"hits": hits}, **metadata}
+    )
 
 
 def lookup(config, lineage, handler, *, primary=(), slots=20, cutoff=None):
@@ -340,24 +345,8 @@ def test_malformed_ca_and_password_unavailable(config, lineage, tmp_path):
     [
         (lambda: httpx.Response(200, content=b"invalid"), "malformed_response"),
         (lambda: httpx.Response(200, json={"hits": {"hits": {}}}), "malformed_response"),
-        (
-            lambda: httpx.Response(
-                200, json={"timed_out": False, "hits": {"hits": []}, "_shards": {"failed": 1}}
-            ),
-            "partial_response",
-        ),
-        (
-            lambda: httpx.Response(
-                200,
-                json={
-                    "timed_out": False,
-                    "hits": {"hits": []},
-                    "_shards": {"failed": 0},
-                    "terminated_early": True,
-                },
-            ),
-            "partial_response",
-        ),
+        (lambda: reply(_shards={**COMPLETE_SHARDS, "successful": 2, "failed": 1}), "partial_response"),
+        (lambda: reply(terminated_early=True), "partial_response"),
         (lambda: httpx.Response(200, json={"timed_out": False, "hits": {"hits": []}}), "malformed_response"),
         (lambda: httpx.Response(200, content=b"[" * 2000 + b"]" * 2000), "malformed_response"),
         (lambda: httpx.Response(200, content=b"x" * (MAX_RESPONSE + 1)), "response_limit"),
@@ -365,6 +354,57 @@ def test_malformed_ca_and_password_unavailable(config, lineage, tmp_path):
 )
 def test_wire_response_bounds_and_shape(config, lineage, response, error):
     assert lookup(config, lineage, lambda _: response())[2]["error"] == error
+
+
+@pytest.mark.parametrize(
+    ("shards", "with_hits"),
+    [
+        (COMPLETE_SHARDS, True),
+        (COMPLETE_SHARDS, False),
+        ({**COMPLETE_SHARDS, "skipped": 2}, True),
+        ({**COMPLETE_SHARDS, "skipped": 3}, False),
+        (dict.fromkeys(COMPLETE_SHARDS, 0), False),
+    ],
+)
+def test_complete_shard_responses(config, lineage, shards, with_hits):
+    hits = [hit(lineage["child"])] if with_hits else []
+    config = replace(config, wazuh_retrieval_max_queries=1)
+    rows, _, stats = lookup(config, lineage, lambda _: reply(*hits, _shards=shards))
+    assert len(rows) == int(with_hits)
+    assert stats["status"] == ("matched" if with_hits else "no_match") and "error" not in stats
+
+
+@pytest.mark.parametrize("counter", COMPLETE_SHARDS)
+def test_missing_shard_counter_is_rejected(config, lineage, counter):
+    shards = {key: value for key, value in COMPLETE_SHARDS.items() if key != counter}
+    assert lookup(config, lineage, lambda _: reply(_shards=shards))[2]["error"] == "malformed_response"
+
+
+@pytest.mark.parametrize("counter", COMPLETE_SHARDS)
+@pytest.mark.parametrize("invalid", [-1, False, True, "0", 0.0, None])
+def test_invalid_shard_counter_is_rejected(config, lineage, counter, invalid):
+    shards = {**COMPLETE_SHARDS, counter: invalid}
+    assert lookup(config, lineage, lambda _: reply(_shards=shards))[2]["error"] == "malformed_response"
+
+
+@pytest.mark.parametrize(
+    "shards",
+    [
+        [],
+        None,
+        {**COMPLETE_SHARDS, "skipped": 4},
+        {**COMPLETE_SHARDS, "successful": 4},
+        {**COMPLETE_SHARDS, "failed": 1},
+    ],
+)
+def test_malformed_or_inconsistent_shard_metadata_is_rejected(config, lineage, shards):
+    assert lookup(config, lineage, lambda _: reply(_shards=shards))[2]["error"] == "malformed_response"
+
+
+def test_server_search_timeout(config, lineage):
+    rows, _, stats = lookup(config, lineage, lambda _: reply(hit(lineage["child"]), timed_out=True))
+    assert not rows and stats["status"] == "timeout"
+    assert stats["error"] == "deadline_or_transport_timeout"
 
 
 def test_streamed_body_size_limit_without_content_length(config, lineage):
@@ -528,6 +568,33 @@ def test_indexer_failure_falls_back_and_records_durable_status(config, lineage):
         run["evidence"]["alerts"] == case["incident"]["alerts"] and run["evidence"]["indexer_context"] == []
     )
     assert "private body" not in json.dumps(run)
+
+
+@pytest.mark.parametrize("rejection_query", [1, 2])
+def test_incomplete_shards_with_zero_failures_use_only_primary_evidence(config, lineage, rejection_query):
+    queries = []
+
+    def search(request):
+        queries.append(request)
+        if len(queries) == rejection_query:
+            # Skipped shards overlap successful shards, so this is still incomplete.
+            shards = {"total": 3, "successful": 2, "skipped": 1, "failed": 0}
+            raw = lineage["child" if rejection_query == 1 else "parent"]
+            return reply(hit(raw), _shards=shards)
+        return reply(hit(lineage["child"]))
+
+    service = Service(config, indexer_transport=httpx.MockTransport(search))
+    service.store.ingest(lineage["trigger"])
+    service.tick()
+    case = service.store.cases()[0]
+    run = service.store.get_run(case["latest_run_id"])
+    assert run["status"] == "completed"
+    assert run["evidence"]["alerts"] == case["incident"]["alerts"]
+    assert run["evidence"]["indexer_context"] == [] and run["evidence"]["indexer_provenance"] == {}
+    stats = run["evidence"]["indexer_retrieval"]
+    assert stats["status"] == "failed" and stats["error"] == "partial_response"
+    assert stats["queries"] == len(queries) == rejection_query and stats["accepted"] == 0
+    assert case["verdict"]["evidence_ids"] == [lineage["trigger"]["id"]]
 
 
 def test_interrupted_snapshot_is_not_retried(config, lineage):
