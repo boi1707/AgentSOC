@@ -1,5 +1,9 @@
 # Read-only assistant: grounded explanations and output validation
 
+Follow-up on baseline `013457e3...`: [focused retry and factual fallback](ASSISTANT_FOCUSED_FALLBACK.md).
+That update adds a distinct retry instruction, `placeholder_output` classification,
+a 2,400-character interpretation cap, and a shared labelled stored-evidence summary.
+
 Baseline: `cb87e4fcd92120e24509256d04bc26489b1c75fc`.
 Feature branch: `feat/assistant-grounded-interpretation`.
 Local review: 2026-11-26. No VPS deployment or secret changes.

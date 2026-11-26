@@ -80,6 +80,13 @@ một lần với context nhỏ hơn, deadline và giới hạn response. Khi v�
 `interpretation=null`, `model_status=unavailable`, giữ facts, citations và stored analysis.
 Chế độ mock chỉ trả dữ kiện; không giả lập một cuộc hội thoại AI.
 
+Retry dùng **instruction khác, ngắn và tập trung hơn**, không chỉ thu nhỏ cùng prompt.
+Placeholder hoặc danh sách ID lặp trả mã an toàn `model_error=placeholder_output`.
+Khi không có diễn giải hợp lệ, Web và Telegram cùng hiển thị bản tóm tắt xác định từ dữ liệu đã lưu,
+gắn nhãn **Stored analysis / Evidence-based summary**; đó không phải nhận định LLM mới.
+Telegram chỉ gửi văn bản và tham chiếu citation, không gửi normalized evidence JSON.
+Chi tiết và hướng dẫn cập nhật helper Shuffle: [Focused assistant fallback](docs/ASSISTANT_FOCUSED_FALLBACK.md).
+
 Fixture ICMP kiểm tra luồng `10.100.27.10 → 172.22.50.10`, rule `100101`, level `7`,
 stored verdict `benign`, confidence `0.92`, grounded `1`: **không đề xuất chặn** vì kết luận đã lưu
 không xác lập tấn công. Đây là kiểm thử tái dựng tình huống, không phải xác minh lại incident trên VPS.
@@ -248,12 +255,12 @@ trên pfSense thật vẫn bị vô hiệu hóa.
 
 ### Assistant fix — kiểm tra local ngày 26/11/2026
 
-Bản sửa xây trực tiếp trên baseline `cb87e4fcd92120e24509256d04bc26489b1c75fc`.
+Bản sửa focused fallback xây trực tiếp trên baseline `013457e3face0e713765bd7194cfcab6805dca1a`.
 
 | Kiểm tra | Kết quả |
 | --- | --- |
-| Toàn bộ backend pytest | **299 passed, 1 skipped** |
-| Ruff check / format | **PASS**, 66 Python files |
+| Toàn bộ backend pytest | **308 passed, 1 skipped** |
+| Ruff check / format | **PASS**, 70 Python files (gồm integrations) |
 | Frontend typecheck / lint / production build | **PASS** |
 | Browser E2E — Chrome, desktop/mobile và assistant EN/VI | **3 passed** |
 | npm install audit | **0 lỗ hổng được báo cáo** |
@@ -313,6 +320,7 @@ không gửi Telegram, chạy SSH thật hoặc tiêu tiền cloud API. Live int
 ## Tài liệu và giới hạn
 
 - [Assistant grounding fix: chẩn đoán placeholder, retry, kiểm thử và rollout/rollback](docs/ASSISTANT_GROUNDING_FIX.md)
+- [Focused fallback: prompt retry khác biệt, tóm tắt chung Web/Telegram và CI](docs/ASSISTANT_FOCUSED_FALLBACK.md)
 - [Nâng cấp AI Assistant, EN/VI, approval và security design](docs/UPGRADE_AI_ASSISTANT.md)
 - [Deployment readiness, CI evidence, migration và rollback runbook](docs/DEPLOYMENT_READINESS.md)
 - [Shuffle/Telegram: hướng dẫn workflow từng node, trust và delivery](integrations/shuffle/WORKFLOWS.md)
