@@ -3,6 +3,57 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Explicit Windows/Sysmon schema. Raw rendering/message fields are deliberately absent.
+EVENT_FIELDS = {
+    **dict.fromkeys(("processGuid", "parentProcessGuid", "sourceProcessGuid", "targetProcessGuid"), 128),
+    **dict.fromkeys(("processId", "parentProcessId", "sourceProcessId", "targetProcessId"), 32),
+    **dict.fromkeys(
+        (
+            "image",
+            "parentImage",
+            "sourceImage",
+            "targetImage",
+            "targetFilename",
+            "originalFileName",
+            "targetObject",
+        ),
+        2048,
+    ),
+    **dict.fromkeys(("user", "parentUser"), 512),
+    **dict.fromkeys(("commandLine", "parentCommandLine"), 8192),
+    **dict.fromkeys(("utcTime", "creationUtcTime"), 64),
+    **dict.fromkeys(("sourceIp", "destinationIp"), 64),
+    **dict.fromkeys(("sourcePort", "destinationPort", "queryStatus"), 32),
+    **dict.fromkeys(("integrityLevel", "protocol", "initiated", "eventType", "type", "grantedAccess"), 128),
+    "hashes": 4096,
+    "queryName": 1024,
+    "queryResults": 4096,
+    "details": 4096,
+}
+SYSTEM_FIELDS = {"eventID": 16, "eventRecordID": 64, "providerName": 256, "channel": 256, "systemTime": 64}
+NUMERIC_FIELDS = {
+    "processId",
+    "parentProcessId",
+    "sourceProcessId",
+    "targetProcessId",
+    "sourcePort",
+    "destinationPort",
+    "eventID",
+    "eventRecordID",
+    "queryStatus",
+}
+
+
+def validate_windows_fields(value, fields):
+    for key, limit in fields.items():
+        item = value.get(key)
+        if item is None:
+            continue
+        valid = isinstance(item, str) or (key in NUMERIC_FIELDS and type(item) is int and item >= 0)
+        valid |= key == "initiated" and type(item) is bool
+        if not valid or len(str(item)) > limit:
+            raise ValueError("Invalid or oversized Windows evidence field: " + key)
+
 
 class WazuhAlert(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -52,19 +103,8 @@ class WazuhAlert(BaseModel):
             ):
                 raise ValueError("Windows computer identity must be a string")
             event = win.get("eventdata", {})
-            if any(
-                event.get(key) is not None and not isinstance(event[key], str)
-                for key in (
-                    "image",
-                    "commandLine",
-                    "parentImage",
-                    "originalFileName",
-                    "user",
-                    "sourceIp",
-                    "destinationIp",
-                )
-            ):
-                raise ValueError("Known Windows evidence fields must be strings")
+            validate_windows_fields(event, EVENT_FIELDS)
+            validate_windows_fields(win.get("system", {}), SYSTEM_FIELDS)
         return value
 
 
@@ -143,22 +183,9 @@ def normalize(alert, host_ips=None):
         "severity": severity,
         "event_type": event_type,
     }
-    row.update(
-        {
-            k: event[k]
-            for k in (
-                "image",
-                "commandLine",
-                "parentImage",
-                "originalFileName",
-                "user",
-                "destinationIp",
-                "destinationPort",
-                "sourceIp",
-            )
-            if k in event
-        }
-    )
+    row.update({k: event[k] for k in EVENT_FIELDS if event.get(k) is not None})
+    system = win.get("system", {})
+    row.update({k: system[k] for k in SYSTEM_FIELDS if system.get(k) is not None})
     if network:
         row.update(msg=data.get("msg", ""), dst_port=data.get("dst_port"), proto=data.get("proto"))
     if kind == "generic":
@@ -166,7 +193,7 @@ def normalize(alert, host_ips=None):
         if isinstance(alert.get("syscheck"), dict):
             row["file"] = alert["syscheck"].get("path")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source": "wazuh",
         "external_id": alert["id"],
         "source_timestamp": timestamp,

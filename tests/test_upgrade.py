@@ -86,8 +86,9 @@ def test_linux_authentication_is_not_forced_into_network_or_sysmon(console, sett
     with console.app.state.service.store.connect() as db:
         assert db.execute("SELECT status FROM jobs").fetchone()[0] == "completed"
         assert (
-            db.execute("SELECT count(*) FROM ledger WHERE agent IN ('net','host','judge')").fetchone()[0] == 3
+            db.execute("SELECT count(*) FROM ledger WHERE agent IN ('net','host','judge')").fetchone()[0] == 2
         )
+        assert db.execute("SELECT status FROM steps WHERE role='net'").fetchone()[0] == "skipped"
         assert all("linux-server" not in r[0] for r in db.execute("SELECT prompt FROM ledger"))
 
 

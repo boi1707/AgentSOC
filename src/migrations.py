@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS vt_jobs(case_id TEXT NOT NULL,ip TEXT NOT NULL,status
  available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT,report TEXT,
  PRIMARY KEY(case_id,ip));
 CREATE TABLE IF NOT EXISTS vt_cache(ip TEXT PRIMARY KEY,report TEXT NOT NULL,expires REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS vt_hash_jobs(case_id TEXT NOT NULL,sha256 TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',
+ available REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,error TEXT,report TEXT,
+ PRIMARY KEY(case_id,sha256));
+CREATE TABLE IF NOT EXISTS vt_hash_cache(sha256 TEXT PRIMARY KEY,report TEXT NOT NULL,expires REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS vt_hash_due ON vt_hash_jobs(status,available,lease_until);
 CREATE TABLE IF NOT EXISTS vt_budget(id INTEGER PRIMARY KEY CHECK(id=1),day TEXT NOT NULL,count INTEGER NOT NULL,next_at REAL NOT NULL);
 
 CREATE TABLE IF NOT EXISTS thehive_sync(case_id TEXT PRIMARY KEY,remote_id TEXT,payload_hash TEXT,
@@ -188,4 +193,5 @@ def _apply(db, *, host_ips=None):
            WHERE block_requested_at IS NULL AND ownership_marker=id"""
     )
     db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (time.time(),))
+    db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (time.time(),))
     db.commit()

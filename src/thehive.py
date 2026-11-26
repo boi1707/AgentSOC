@@ -27,6 +27,7 @@ def payload(case, settings):
         "workflow_status": case.get("workflow_status"),
         "verdict": verdict,
         "virustotal": case.get("virustotal", []),
+        "virustotal_hashes": case.get("virustotal_hashes", []),
         "evidence_ids": case["incident"].get("raw_ids", []),
     }
     restore = case.get("restore", {})
@@ -94,7 +95,9 @@ def sync_pending(store, settings, *, transport=None):
         state = dict(db.execute("SELECT * FROM thehive_sync WHERE case_id=?", (cid,)).fetchone())
     from .integrations import incident_integrations
 
-    case["virustotal"] = incident_integrations(store, cid)["virustotal"]
+    enrichment = incident_integrations(store, cid)
+    case["virustotal"] = enrichment["virustotal"]
+    case["virustotal_hashes"] = enrichment["virustotal_hashes"]
     body = payload(case, settings)
     digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     remote_id = state["remote_id"]

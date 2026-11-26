@@ -22,6 +22,8 @@ class ToolResult(BaseModel):
     items: list[dict]
     cutoff: float
     truncated: bool
+    scope: str = "historical_context"
+    citable_for_current_verdict: bool = False
 
 
 class ToolBlocked(ValueError):
@@ -85,8 +87,14 @@ def _execute(store, request, anon, *, incident_id, actor="worker"):
                 raise PermissionError("Entity is outside evidence snapshot")
             # json_each avoids substring matches and all values use bound parameters.
             rows = db.execute(
-                "SELECT id,normalized,received FROM inbox WHERE received BETWEEN ? AND ? AND EXISTS(SELECT 1 FROM json_each(inbox.normalized,'$.entities') WHERE value=?) ORDER BY received DESC,id LIMIT ?",
-                (run["cutoff"] - request.window_seconds, run["cutoff"], request.entity, request.limit + 1),
+                "SELECT id,normalized,received FROM inbox WHERE received BETWEEN ? AND ? AND (case_id IS NULL OR case_id!=?) AND EXISTS(SELECT 1 FROM json_each(inbox.normalized,'$.entities') WHERE value=?) ORDER BY received DESC,id LIMIT ?",
+                (
+                    run["cutoff"] - request.window_seconds,
+                    run["cutoff"],
+                    incident_id,
+                    request.entity,
+                    request.limit + 1,
+                ),
             ).fetchall()
             items = [
                 {
@@ -127,9 +135,15 @@ def _execute(store, request, anon, *, incident_id, actor="worker"):
         items=items[: request.limit],
         cutoff=run["cutoff"],
         truncated=len(items) > request.limit,
+        scope="current_incident"
+        if request.name == "incident_evidence"
+        else "previous_ai_investigations"
+        if request.name == "previous_investigations"
+        else "related_historical_alerts",
+        citable_for_current_verdict=request.name == "incident_evidence",
     )
-    safe_args = anon.obj(request.model_dump())
-    safe_result = anon.obj(result.model_dump())
+    safe = anon.obj({"args": request.model_dump(), "result": result.model_dump()})
+    safe_args, safe_result = safe["args"], safe["result"]
     prompt, output = json.dumps(safe_args), json.dumps(safe_result)
     refused = bool(anon.leaks(prompt) or anon.leaks(output))
     with store.connect() as db:

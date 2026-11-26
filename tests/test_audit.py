@@ -47,8 +47,8 @@ def test_cost_requires_recorded_tokens_and_both_prices(settings):
             (json.dumps({"prompt_tokens": 100, "completion_tokens": 20}),),
         )
     measured = report(settings.db, input_price=2, output_price=4)
-    assert measured["input_tokens"] == 300 and measured["output_tokens"] == 60
-    assert measured["estimated_cost_usd"] == pytest.approx(0.00084)
+    assert measured["input_tokens"] == 200 and measured["output_tokens"] == 40
+    assert measured["estimated_cost_usd"] == pytest.approx(0.00056)
     assert report(settings.db, input_price=2)["estimated_cost_usd"] is None
 
 

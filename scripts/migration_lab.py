@@ -14,6 +14,7 @@ from src.storage import Store
 BASELINE = "0022d28"
 V2_TABLES = {"callback_receipts", "notification_outbox"}
 V3_TABLES = {"managed_block_leases"}
+V4_TABLES = {"vt_hash_jobs", "vt_hash_cache"}
 
 
 def snapshot(path):

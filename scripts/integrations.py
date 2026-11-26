@@ -41,6 +41,7 @@ def main():
         for table, columns in (
             ("thehive_sync", "case_id,remote_id,state,error"),
             ("vt_jobs", "case_id,ip,status,error"),
+            ("vt_hash_jobs", "case_id,sha256,status,error"),
             ("shuffle_outbox", "id,case_id,status,attempts,error"),
         ):
             sql = f"SELECT {columns} FROM {table}" + (" WHERE case_id=?" if args.case else "") + " LIMIT 100"

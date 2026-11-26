@@ -9,7 +9,7 @@ from .adapters.wazuh import normalize
 from .managed_response import LOCAL_ONLY_AVAILABLE
 from .managed_response import MODE as MANAGED_MODE
 from .migrations import migrate
-from .virustotal import public_ips
+from .virustotal import public_ips, sha256_values
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY, received REAL NOT NULL, alert TEXT NOT NULL,
@@ -375,7 +375,7 @@ class Store:
                 now,
                 json.dumps(snapshot),
                 cutoff,
-                "net-host-judge-v2",
+                "net-host-judge-v3",
                 None if not settings else "mock" if settings.llm_mode == "mock" else "openai-compatible",
                 settings.llm_model if settings and settings.llm_mode == "live" else None,
                 settings.llm_mode if settings else "unconfigured",
@@ -460,6 +460,8 @@ class Store:
         db.execute("INSERT OR IGNORE INTO thehive_sync(case_id) VALUES(?)", (cid,))
         for ip in public_ips(json.loads(row["incident"]).get("ips", [])):
             db.execute("INSERT OR IGNORE INTO vt_jobs(case_id,ip) VALUES(?,?)", (cid, ip))
+        for value in sha256_values(json.loads(row["incident"]).get("alerts", [])):
+            db.execute("INSERT OR IGNORE INTO vt_hash_jobs(case_id,sha256) VALUES(?,?)", (cid, value))
 
     def complete_job(self, job, verdict, restore, *, settings=None):
         with self.connect() as db:
