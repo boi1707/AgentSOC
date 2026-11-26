@@ -44,6 +44,16 @@ class Settings:
     secure_cookie: bool = False
     lease_seconds: float = 120
     wazuh_source: str = "wazuh"
+    wazuh_retrieval_enabled: bool = False
+    wazuh_indexer_url: str = ""
+    wazuh_indexer_username: str = ""
+    wazuh_indexer_password_file: str = ""
+    wazuh_indexer_ca_file: str = ""
+    wazuh_indexer_index_pattern: str = "wazuh-alerts-*"
+    wazuh_retrieval_timeout: float = 3
+    wazuh_retrieval_window: int = 120
+    wazuh_retrieval_max_alerts: int = 20
+    wazuh_retrieval_max_queries: int = 3
     thehive_url: str = ""
     thehive_key: str = ""
     shuffle_hook: str = ""
@@ -102,6 +112,16 @@ class Settings:
             secure_cookie=os.getenv("SESSION_COOKIE_SECURE", "0") == "1",
             lease_seconds=float(os.getenv("JOB_LEASE_SECONDS", "120")),
             wazuh_source=os.getenv("WAZUH_SOURCE_ID", "wazuh"),
+            wazuh_retrieval_enabled=os.getenv("WAZUH_RETRIEVAL_ENABLED", "0") == "1",
+            wazuh_indexer_url=os.getenv("WAZUH_INDEXER_URL", ""),
+            wazuh_indexer_username=os.getenv("WAZUH_INDEXER_USERNAME", ""),
+            wazuh_indexer_password_file=os.getenv("WAZUH_INDEXER_PASSWORD_FILE", ""),
+            wazuh_indexer_ca_file=os.getenv("WAZUH_INDEXER_CA_FILE", ""),
+            wazuh_indexer_index_pattern=os.getenv("WAZUH_INDEXER_INDEX_PATTERN", "wazuh-alerts-*"),
+            wazuh_retrieval_timeout=float(os.getenv("WAZUH_RETRIEVAL_TIMEOUT_SECONDS", "3")),
+            wazuh_retrieval_window=int(os.getenv("WAZUH_RETRIEVAL_WINDOW_SECONDS", "120")),
+            wazuh_retrieval_max_alerts=int(os.getenv("WAZUH_RETRIEVAL_MAX_ALERTS", "20")),
+            wazuh_retrieval_max_queries=int(os.getenv("WAZUH_RETRIEVAL_MAX_QUERIES", "3")),
             thehive_url=os.getenv("THEHIVE_URL", "").rstrip("/"),
             thehive_key=os.getenv("THEHIVE_KEY", ""),
             shuffle_hook=os.getenv("SHUFFLE_HOOK", ""),
@@ -145,6 +165,16 @@ class Settings:
                 hook.query,
                 *[v for _, v in parse_qsl(hook.query) if len(v) >= 16],
                 *[v for v in hook.path.split("/") if len(v) >= 16],
+                *(
+                    (
+                        self.wazuh_indexer_url.rstrip("/"),
+                        self.wazuh_indexer_username,
+                        self.wazuh_indexer_password_file,
+                        self.wazuh_indexer_ca_file,
+                    )
+                    if self.wazuh_retrieval_enabled
+                    else ()
+                ),
             )
             if v
         )
@@ -200,6 +230,10 @@ class Settings:
                 raise ValueError("Invalid THEHIVE_URL")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", self.wazuh_source):
             raise ValueError("WAZUH_SOURCE_ID must be 1..64 letters, digits, underscore or hyphen")
+        if self.wazuh_retrieval_enabled:
+            from .wazuh_retrieval import validate_config
+
+            validate_config(self)
         if len(self.ingest_key) < 24 or len(self.approve_key) < 24:
             raise ValueError("Set separate INGEST_KEY and APPROVE_KEY of at least 24 characters")
         if self.ingest_key == self.approve_key:

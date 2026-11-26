@@ -17,12 +17,13 @@ from .thehive import sync_pending
 from .tools import ToolRequest
 from .tools import execute as execute_tool
 from .virustotal import enrich_pending
+from .wazuh_retrieval import retrieve
 
 log = logging.getLogger("agentsoc.service")
 
 
 class Service:
-    def __init__(self, settings, *, managed_transport=None, managed_clock=time.time):
+    def __init__(self, settings, *, managed_transport=None, managed_clock=time.time, indexer_transport=None):
         self.settings = settings
         self.store = Store(settings.db, host_ips=settings.host_ips)
         if managed_transport is not None:
@@ -30,6 +31,7 @@ class Service:
                 raise ValueError("Managed simulation requires a non-demo dry-run configuration")
             self.store.managed = ManagedResponse(self.store, settings, managed_transport, clock=managed_clock)
         self.llm = LLM(settings, self.store)
+        self.indexer_transport = indexer_transport
         self.owner = uuid.uuid4().hex
         self.lock = threading.Lock()
         self.managed_warning_at = 0
@@ -122,6 +124,7 @@ class Service:
             ),
         )
         self.llm.run_id, self.llm.attempt = run["id"], job["attempts"]
+        self.llm.prompt_version = run["prompt_version"]
         with self.store.connect() as db:
             db.execute(
                 "UPDATE runs SET parameters=? WHERE id=?",
@@ -156,6 +159,11 @@ class Service:
         keeper = threading.Thread(target=maintain_lease, daemon=True)
         keeper.start()
         try:
+            state = run["evidence"].get("indexer_retrieval", {}).get("status")
+            if not run["replay"] and state in {"pending", "collecting"}:
+                run = self.finalize_evidence(job, run, state, anon)
+                if run is None:
+                    return
             evidence = execute_tool(
                 self.store,
                 ToolRequest(name="incident_evidence", run_id=run["id"], limit=self.settings.cap),
@@ -215,6 +223,37 @@ class Service:
             stop.set()
             keeper.join(timeout=2)
             self.llm.run_id = None
+
+    def finalize_evidence(self, job, run, state, anon):
+        settings = self.settings
+        if state == "collecting" or not settings.wazuh_retrieval_enabled or settings.demo:
+            stats = {
+                "status": "interrupted" if state == "collecting" else "disabled",
+                "queries": None if state == "collecting" else 0,
+                "retrieved": 0,
+                "duration_ms": None if state == "collecting" else 0,
+            }
+            return self.store.finish_indexer_snapshot(job, run, [], {}, stats)
+        inputs = self.store.begin_indexer_snapshot(job, run, settings.wazuh_source)
+        if inputs is None:
+            return None
+        candidates, primary = inputs
+        rows, provenance, stats = retrieve(
+            settings,
+            candidates,
+            primary,
+            run["cutoff"],
+            max(0, settings.cap - len(run["evidence"]["alerts"])),
+            transport=self.indexer_transport,
+            reserved_ids=run["evidence"]["raw_ids"],
+        )
+        if rows:
+            probe = Anon(settings.hosts, secrets=anon.secrets)
+            trial = probe.obj(run["evidence"]["alerts"] + rows)
+            if probe.leaks(json.dumps(trial, ensure_ascii=False)):
+                rows, provenance = [], {}
+                stats.update(status="failed", error="privacy_guard")
+        return self.store.finish_indexer_snapshot(job, run, rows, provenance, stats)
 
     def notify(self, cid, verdict):
         if self.store.managed is not None:

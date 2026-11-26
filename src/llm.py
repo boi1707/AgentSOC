@@ -20,6 +20,7 @@ class LLM:
         self.settings, self.store, self.post = settings, store, post or httpx.post
         self.run_id = None
         self.attempt = 1
+        self.prompt_version = "net-host-judge-v3"
 
     def skip(self, cid, role):
         """Durable local finding, not a model call or a failed step."""
@@ -157,7 +158,7 @@ class LLM:
                         step_id,
                         "mock" if self.settings.llm_mode == "mock" else "openai-compatible",
                         actual_model,
-                        "net-host-judge-v3",
+                        self.prompt_version,
                         self.attempt,
                         model_source,
                         json.dumps({"temperature": 0, "max_tokens": 2048, "max_prompt_bytes": 262144}),

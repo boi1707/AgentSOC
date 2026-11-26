@@ -82,6 +82,9 @@ def _execute(store, request, anon, *, incident_id, actor="worker"):
         db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
         if request.name == "incident_evidence":
             items = run["evidence"]["alerts"]
+            if "indexer_retrieval" in run["evidence"]:
+                items = [{**row, "evidence_class": "primary"} for row in items]
+                items.extend(run["evidence"].get("indexer_context", []))
         elif request.name == "related_alerts":
             if not request.entity or request.entity not in entities:
                 raise PermissionError("Entity is outside evidence snapshot")

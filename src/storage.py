@@ -10,6 +10,7 @@ from .managed_response import LOCAL_ONLY_AVAILABLE
 from .managed_response import MODE as MANAGED_MODE
 from .migrations import migrate
 from .virustotal import public_ips, sha256_values
+from .wazuh_retrieval import PROMPT_VERSION as INDEXER_PROMPT_VERSION
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY, received REAL NOT NULL, alert TEXT NOT NULL,
@@ -362,9 +363,19 @@ class Store:
             if not original:
                 raise ValueError("Replay parent is not an investigation of this incident")
             snapshot, cutoff = json.loads(original["evidence"]), original["cutoff"]
+            if snapshot.get("indexer_retrieval", {}).get("status") in {"pending", "collecting"}:
+                raise ValueError("Replay parent evidence is still being finalized")
         else:
             snapshot = snapshot or json.loads(case["incident"])
             cutoff = time.time()
+            if (
+                settings
+                and settings.wazuh_retrieval_enabled
+                and not settings.demo
+                and not case["synthetic"]
+                and case["provenance"] == "received"
+            ):
+                snapshot = {**snapshot, "indexer_retrieval": {"status": "pending"}}
         rid = uuid.uuid4().hex
         now = time.time()
         db.execute(
@@ -375,7 +386,7 @@ class Store:
                 now,
                 json.dumps(snapshot),
                 cutoff,
-                "net-host-judge-v3",
+                INDEXER_PROMPT_VERSION if "indexer_retrieval" in snapshot else "net-host-judge-v3",
                 None if not settings else "mock" if settings.llm_mode == "mock" else "openai-compatible",
                 settings.llm_model if settings and settings.llm_mode == "live" else None,
                 settings.llm_mode if settings else "unconfigured",
@@ -400,6 +411,77 @@ class Store:
             actor, "investigation.queued" if not parent else "investigation.replay", rid, "queued", db=db
         )
         return rid
+
+    @staticmethod
+    def _owns_indexer_job(db, job):
+        return db.execute(
+            "SELECT 1 FROM jobs WHERE id=? AND run_id=? AND owner=? AND attempts=? AND status='running' AND lease_until>?",
+            (job["id"], job["run_id"], job["owner"], job["attempts"], time.time()),
+        ).fetchone()
+
+    def begin_indexer_snapshot(self, job, run, source):
+        """Reserve the one external collection attempt before sending any queries."""
+        snapshot = run["evidence"]
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not self._owns_indexer_job(db, job):
+                return None
+            reserved = db.execute(
+                "UPDATE runs SET evidence=? WHERE id=? AND json_extract(evidence,'$.indexer_retrieval.status')='pending'",
+                (json.dumps({**snapshot, "indexer_retrieval": {"status": "collecting"}}), run["id"]),
+            )
+            if not reserved.rowcount:
+                return None
+            linked = db.execute(
+                "SELECT id,source,external_id FROM inbox WHERE case_id=?", (job["case_id"],)
+            ).fetchall()
+            ranked = {row["id"]: n for n, row in enumerate(snapshot["alerts"]) if row["kind"] == "host"}
+            anchors = sorted(
+                (row["id"] for row in linked if row["source"] == source and row["id"] in ranked),
+                key=ranked.__getitem__,
+            )
+            records = dict(
+                db.execute(
+                    "SELECT id,alert FROM inbox WHERE id IN (SELECT value FROM json_each(?)) AND case_id=?",
+                    (json.dumps(anchors), job["case_id"]),
+                )
+            )
+        return [json.loads(records[aid]) for aid in anchors if aid in records], {
+            (row["source"], row["external_id"]) for row in linked
+        }
+
+    def finish_indexer_snapshot(self, job, run, rows, provenance, stats):
+        snapshot = run["evidence"]
+        reserved_ids = set(snapshot["raw_ids"]) | {row["id"] for row in snapshot["alerts"]}
+        rows = [row for row in rows if row["id"] not in reserved_ids]
+        stats = {
+            **stats,
+            "accepted": len(rows),
+            "rejected": stats["retrieved"] - len(rows),
+            "correlation_reasons": sorted({row["correlation_reason"] for row in rows}),
+        }
+        if not rows and stats["status"] == "matched":
+            stats["status"] = "no_match"
+        frozen = {
+            **snapshot,
+            # The previous worker only reads alerts. Keep contextual rows behind
+            # an additive key so a rollback cannot analyze them as primary.
+            "indexer_context": rows,
+            "indexer_provenance": {row["id"]: provenance[row["id"]] for row in rows},
+            "indexer_retrieval": stats,
+        }
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not self._owns_indexer_job(db, job):
+                return None
+            saved = db.execute(
+                "UPDATE runs SET evidence=? WHERE id=? AND json_extract(evidence,'$.indexer_retrieval.status') IN ('pending','collecting')",
+                (json.dumps(frozen), run["id"]),
+            )
+            if not saved.rowcount:
+                return None
+            self.audit("worker", "evidence.indexer_retrieval", run["id"], json.dumps(stats), db=db)
+        return {**run, "evidence": frozen}
 
     def get_run(self, rid):
         with self.connect() as db:
@@ -530,8 +612,7 @@ class Store:
             else:
                 self._fail_run(db, current, error)
 
-    @staticmethod
-    def _fail_run(db, job, error):
+    def _fail_run(self, db, job, error):
         db.execute("UPDATE steps SET status='skipped' WHERE run_id=? AND status='queued'", (job["run_id"],))
         db.execute(
             "UPDATE jobs SET status='dead_letter',error=?,lease_until=NULL WHERE id=?", (error, job["id"])
@@ -540,8 +621,22 @@ class Store:
             "UPDATE runs SET status='failed',error=?,finished=? WHERE id=?",
             (error, time.time(), job["run_id"]),
         )
-        run = db.execute("SELECT replay,mode FROM runs WHERE id=?", (job["run_id"],)).fetchone()
+        run = db.execute("SELECT replay,mode,evidence FROM runs WHERE id=?", (job["run_id"],)).fetchone()
         if not run["replay"]:
+            snapshot = json.loads(run["evidence"])
+            if snapshot.get("indexer_retrieval", {}).get("status") in {"pending", "collecting"}:
+                stats = {
+                    "status": "interrupted",
+                    "queries": None,
+                    "retrieved": 0,
+                    "accepted": 0,
+                    "rejected": 0,
+                    "duration_ms": None,
+                    "correlation_reasons": [],
+                }
+                snapshot["indexer_retrieval"] = stats
+                db.execute("UPDATE runs SET evidence=? WHERE id=?", (json.dumps(snapshot), job["run_id"]))
+                self.audit("worker", "evidence.indexer_retrieval", job["run_id"], json.dumps(stats), db=db)
             Store.queue_integrations(db, job["case_id"])
             verdict = {
                 "verdict": "review",
