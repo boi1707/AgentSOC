@@ -1,5 +1,9 @@
 # AgentSOC assistant and secure operator control upgrade
 
+Current read-only interpretation contract, compact context, retry limits and rollback:
+[Assistant grounding fix](ASSISTANT_GROUNDING_FIX.md). The older 12-second request
+description below is historical; the current assistant uses bounded 7/5-second attempts.
+
 Phase 2 validation, inline Telegram buttons, current test results and deployment gates are recorded in
 [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md). The sections below preserve the Phase 1 audit.
 

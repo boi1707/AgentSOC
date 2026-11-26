@@ -27,6 +27,60 @@ test("language switches immediately, persists, and assistant stays read-only", a
     .click();
   await expect(page.getByRole("log").getByText(/Tìm thấy/)).toBeVisible();
   await expect(page.getByRole("log").getByRole("button")).toHaveCount(0);
+  const source = "10.100.27.10";
+  const target = "172.22.50.10";
+  // Rendering fixture only; keep the shared test server empty for the pipeline test.
+  // Real SQLite/provider/API grounding is exercised in test_assistant_grounding.py.
+  await page.route("**/api/v1/assistant/query", async (route) => {
+    await route.fulfill({
+      json: {
+        language: "vi",
+        summary: "Dữ kiện fixture kiểm thử UI",
+        notice: "Fixture",
+        model_status: "unavailable",
+        interpretation: null,
+        truncated: false,
+        citations: [],
+        analysis: [],
+        facts: [
+          {
+            incident_id: "lab-icmp-ui",
+            status: "pending",
+            priority: "normal",
+            wazuh_level: 7,
+            verdict: "benign",
+            confidence: 0.92,
+            grounded: 1,
+            missing_evidence: false,
+            source_ips: [source],
+            destination_ips: [target],
+            rules: [
+              {
+                evidence_id: "lab-icmp-ui-evidence",
+                rule_id: "100101",
+                level: 7,
+              },
+            ],
+            policy_explanation:
+              "Không đề xuất chặn IP: kết luận điều tra đã lưu không xác lập một cuộc tấn công.",
+            proposal: {
+              id: "lab-icmp-ui",
+              eligible: false,
+              source_ip: null,
+              expires: 0,
+            },
+          },
+        ],
+      },
+    });
+  });
+  await page.getByLabel("Hỏi trợ lý").fill("Các sự cố gần đây");
+  await page.getByRole("button", { name: "Gửi", exact: true }).click();
+  const log = page.getByRole("log");
+  await expect(log.getByText(/10\.100\.27\.10.*172\.22\.50\.10/)).toBeVisible();
+  await expect(log.getByText(/Wazuh 100101/)).toBeVisible();
+  await expect(log.getByText(/Kết luận đã lưu/)).toBeVisible();
+  await expect(log.getByRole("button")).toHaveCount(0);
   await page.getByRole("link", { name: "Incident", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Hàng đợi incident", exact: true }),

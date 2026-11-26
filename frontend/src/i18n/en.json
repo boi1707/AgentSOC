@@ -299,6 +299,7 @@
   "Analysis unavailable: ": "Analysis unavailable: ",
   "No decision summary returned": "No decision summary returned",
   "Data unavailable": "Data unavailable",
+  "Stored verdict": "Stored verdict",
   "Provider not recorded": "Provider not recorded",
   "No version metadata": "No version metadata",
   "No model data": "No model data",
