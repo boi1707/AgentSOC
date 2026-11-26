@@ -1,7 +1,10 @@
 """Provider boundary: transport configuration is server-owned; no runtime fallback to mock."""
 
+import asyncio
 import json
 from typing import Protocol
+
+import httpx
 
 
 class Provider(Protocol):
@@ -36,19 +39,40 @@ class OpenAICompatibleProvider:
     def __init__(self, settings, post):
         self.settings, self.post = settings, post
 
+    def request_payload(self, messages, *, role):
+        return {
+            "model": self.settings.llm_model,
+            "temperature": 0,
+            "max_tokens": 1024 if role == "assistant" else 2048,
+            "response_format": {"type": "json_object"},
+            "messages": messages,
+        }
+
     def complete(self, messages, *, role, evidence_ids):
         response = self.post(
             self.settings.llm_url,
             timeout=30,
             follow_redirects=False,
             headers={"Authorization": "Bearer " + self.settings.llm_key},
-            json={
-                "model": self.settings.llm_model,
-                "temperature": 0,
-                "max_tokens": 2048,
-                "response_format": {"type": "json_object"},
-                "messages": messages,
-            },
+            json=self.request_payload(messages, role=role),
         )
         response.raise_for_status()
         return response.json()
+
+    async def bounded_complete(self, messages, *, role, timeout):
+        """Assistant-only wall-clock deadline and response cap; no background retry."""
+        async with asyncio.timeout(timeout):
+            async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+                async with client.stream(
+                    "POST",
+                    self.settings.llm_url,
+                    headers={"Authorization": "Bearer " + self.settings.llm_key},
+                    json=self.request_payload(messages, role=role),
+                ) as response:
+                    response.raise_for_status()
+                    data = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        data.extend(chunk)
+                        if len(data) > 65536:
+                            raise ValueError("Provider response exceeds budget")
+                    return json.loads(data)

@@ -160,9 +160,15 @@ def dispatch(repo, settings, payload, user):
         from src.api.v1 import health_snapshot
 
         return {"system": health_snapshot(repo, settings)}
-    if command not in {"/incidents", "/pending", "/review", "/incident", "/why"}:
+    if not command.startswith("/") or command == "/ask":
+        message = payload.command if command != "/ask" else " ".join(parts[1:])
+        if not message.strip():
+            raise HTTPException(422, "Question required")
+        return answer(repo, settings, Question(message=message, language=payload.language))
+    if command not in {"/incidents", "/dangerous", "/pending", "/review", "/incident", "/why"}:
         raise HTTPException(
-            422, "Supported: /status /incidents /pending /review 24h /incident /why /approve /ignore"
+            422,
+            "Supported: /status /incidents /dangerous /pending /review 24h /incident /why /ask /approve /ignore",
         )
     if command in {"/incident", "/why"} and len(parts) != 2:
         raise HTTPException(422, "Incident ID required")

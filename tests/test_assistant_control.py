@@ -112,7 +112,7 @@ def test_assistant_failure_isolated_and_prompt_boundary(console, settings):
     )
 
     def fail(url, **kwargs):
-        assert kwargs["timeout"] == 12
+        assert 0 < kwargs["timeout"] <= 7
         assert "UNTRUSTED DATA" in kwargs["json"]["messages"][0]["content"]
         assert config.llm_key not in json.dumps(kwargs["json"])
         raise httpx.ConnectError("secret exception must not appear")

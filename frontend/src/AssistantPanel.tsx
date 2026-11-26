@@ -9,6 +9,13 @@ type Fact = {
   priority: string;
   wazuh_level: number;
   missing_evidence: boolean;
+  verdict: string | null;
+  confidence: number | null;
+  grounded: number | null;
+  source_ips: string[];
+  destination_ips: string[];
+  policy_explanation: string;
+  rules: { evidence_id: string; rule_id: string; level: number | null }[];
   proposal: {
     id: string;
     eligible: boolean;
@@ -192,6 +199,32 @@ export function AssistantPanel() {
                             {fact.proposal.source_ip}
                           </span>
                         )}
+                        <br />
+                        {t("Stored verdict")}:{" "}
+                        {fact.verdict ?? t("Data unavailable")}
+                        {" · "}
+                        {t("Confidence")}:{" "}
+                        {fact.confidence ?? t("Data unavailable")}
+                        {" · grounded="}
+                        {fact.grounded ?? "?"}
+                        {!!(
+                          fact.source_ips.length || fact.destination_ips.length
+                        ) && (
+                          <span className="mono">
+                            <br />
+                            {fact.source_ips.join(", ") || "?"} →{" "}
+                            {fact.destination_ips.join(", ") || "?"}
+                          </span>
+                        )}
+                        {fact.rules.map((rule) => (
+                          <span key={rule.evidence_id}>
+                            <br />
+                            Wazuh {rule.rule_id || "?"} · level{" "}
+                            {rule.level ?? "?"} · [{rule.evidence_id}]
+                          </span>
+                        ))}
+                        <br />
+                        {fact.policy_explanation}
                         {fact.missing_evidence && (
                           <span>
                             {" · "}

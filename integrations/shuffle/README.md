@@ -29,7 +29,7 @@ Shuffle secrets, never workflow URLs, source control, logs, or Telegram messages
 5. Route the JSON reply through `query_text`; send plain text only to its returned `chat_id`.
    Do not set Telegram `parse_mode`. Use the bot token in the Telegram app's secret credential field.
    Do not forward raw HTTP errors, server configuration, or full API JSON directly into a group chat.
-6. Use `/status`, `/incidents` (last 24 hours), `/pending`, `/review 24h`, `/incident <id>`, `/why <id>`,
+6. Use `/status`, `/incidents` (last 24 hours), `/dangerous`, `/pending`, `/review 24h`, `/incident <id>`, `/why <id>`,
    `/approve <incident_id> <proposal_id>`, `/ignore <incident_id> <proposal_id>` (`/reject` is an alias).
    Query results include the exact proposal ID needed for a decision. Inline Approve/Ignore buttons
    reference the current analysis-run ID; arbitrary natural-language decision parsing is absent.

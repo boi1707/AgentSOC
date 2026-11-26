@@ -6,12 +6,12 @@
   <a href="#demo">Demo</a> ·
   <a href="#integrations">Tích hợp SOC</a> ·
   <a href="docs/ARCHITECTURE.md">Kiến trúc</a> ·
-  <a href="docs/validation-integrations.md">Kiểm thử</a>
+  <a href="docs/ASSISTANT_GROUNDING_FIX.md">Assistant và kiểm thử</a>
 </p>
 
 Ứng dụng SOC self-hosted cho chuyên viên vận hành: **Wazuh → inbox bền vững → correlation →
 Net/Host/Judge → investigation ledger → human review**. Console React/TypeScript/Tailwind,
-FastAPI và worker riêng,dùng SQLite; không mang một hệ microservices nặng sang VPS.
+FastAPI và worker riêng, dùng SQLite; không mang một hệ microservices nặng sang VPS.
 
 Mặc định **không seed dữ liệu**, `LLM_MODE=mock`, `RESPONSE_MODE=dry-run`. Mock được gắn nhãn,
 không phải đánh giá an ninh thật. Không tự tải model, sửa Wazuh/VPN/firewall hay triển khai VPS.
@@ -55,6 +55,38 @@ minh họa luồng vận hành, không phải kết quả đánh giá phát hi�
 
 Không có graph, threat-intel hay ATT&CK coverage giả. Null/No data nghĩa là chưa có số đo.
 Provider configured không có nghĩa reachable; Wazuh không được gọi connected chỉ vì API đang chạy.
+
+### Read-only AI Assistant — Web và Telegram
+
+Assistant dùng chung backend để giải thích **dữ kiện đã lưu**, không tạo lại kết luận điều tra.
+Context gửi model chỉ gồm incident, IP nguồn/đích, rule và evidence IDs liên quan, rationale đã lưu
+cùng eligibility/lý do của chính sách máy chủ; không gửi toàn bộ normalized logs.
+
+| Bạn muốn biết | Ví dụ câu hỏi |
+| --- | --- |
+| Incident gần đây | “Các sự cố gần đây có gì?” |
+| Incident nguy hiểm nhất | “Incident nào nguy hiểm nhất?” |
+| Đề xuất chờ duyệt | “Có đề xuất nào đang chờ duyệt?” |
+| Giải thích một incident | “Giải thích incident `<incident_id>`” |
+| Vì sao được hoặc không được chặn | “Vì sao không được chặn incident `<incident_id>`?” |
+
+Web hỗ trợ EN/VI và ngữ cảnh incident đang mở. Telegram hỗ trợ các câu hỏi tự nhiên,
+`/ask`, `/dangerous`, `/incident` và `/why` sau kiểm tra HMAC, timestamp và operator mapping.
+Các lệnh Approve/Ignore có cấu trúc vẫn là luồng riêng với quyền và chính sách hiện hữu.
+
+**HTTP 200 không đồng nghĩa có diễn giải hợp lệ.** Chuỗi rỗng, `...`, `…`, placeholder,
+JSON sai hoặc output bị cắt không được gắn `model_status=available`. Assistant retry tối đa
+một lần với context nhỏ hơn, deadline và giới hạn response. Khi vẫn lỗi, trả
+`interpretation=null`, `model_status=unavailable`, giữ facts, citations và stored analysis.
+Chế độ mock chỉ trả dữ kiện; không giả lập một cuộc hội thoại AI.
+
+Fixture ICMP kiểm tra luồng `10.100.27.10 → 172.22.50.10`, rule `100101`, level `7`,
+stored verdict `benign`, confidence `0.92`, grounded `1`: **không đề xuất chặn** vì kết luận đã lưu
+không xác lập tấn công. Đây là kiểm thử tái dựng tình huống, không phải xác minh lại incident trên VPS.
+
+Assistant hội thoại không duyệt incident, chạy shell hoặc sửa pfSense. Giữ
+`RESPONSE_MODE=dry-run` và `PFSENSE_LIVE_ENABLED=0`.
+[Chẩn đoán lỗi, hợp đồng output, kiểm thử, deployment plan và rollback](docs/ASSISTANT_GROUNDING_FIX.md).
 
 ### Phạm vi triển khai và xác minh
 
@@ -155,10 +187,12 @@ Sau khi cấu hình trusted ingress và bot/workflow theo
 ```text
 /status
 /incidents
+/dangerous
 /pending
 /review 24h
 /incident <incident_id>
 /why <incident_id>
+/ask <question>
 /approve <incident_id> <proposal_id>
 /ignore <incident_id> <proposal_id>
 ```
@@ -212,6 +246,24 @@ trên pfSense thật vẫn bị vô hiệu hóa.
 
 ## Kiểm thử và vận hành
 
+### Assistant fix — kiểm tra local ngày 26/11/2026
+
+Bản sửa xây trực tiếp trên baseline `cb87e4fcd92120e24509256d04bc26489b1c75fc`.
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| Toàn bộ backend pytest | **299 passed, 1 skipped** |
+| Ruff check / format | **PASS**, 66 Python files |
+| Frontend typecheck / lint / production build | **PASS** |
+| Browser E2E — Chrome, desktop/mobile và assistant EN/VI | **3 passed** |
+| npm install audit | **0 lỗ hổng được báo cáo** |
+
+Một test gọi paid LLM được skip mặc định; còn cảnh báo deprecation Starlette/httpx.
+Provider/Telegram được giả lập trong tests; chưa kiểm chứng DeepSeek, các dịch vụ ngoài
+hoặc VPS thật cho bản sửa này. Chi tiết: [Assistant grounding validation](docs/ASSISTANT_GROUNDING_FIX.md).
+
+### CI lịch sử — trước bản sửa assistant này
+
 Kết quả đã đối chiếu với **main `c400e704a3733de0fb7c82aa2aa1139d4d356117`**, merge PR #4,
 ngày 17/11/2026: [GitHub Actions run 44102987963](https://github.com/boi1707/AgentSOC/actions/runs/44102987963).
 [Workflow `Backend checks`](https://github.com/boi1707/AgentSOC/actions/workflows/tests.yml)
@@ -260,6 +312,7 @@ Test tạo DB riêng, đi qua HTTP thật, worker process riêng và SQLite th�
 không gửi Telegram, chạy SSH thật hoặc tiêu tiền cloud API. Live integration chưa được bật tự động.
 ## Tài liệu và giới hạn
 
+- [Assistant grounding fix: chẩn đoán placeholder, retry, kiểm thử và rollout/rollback](docs/ASSISTANT_GROUNDING_FIX.md)
 - [Nâng cấp AI Assistant, EN/VI, approval và security design](docs/UPGRADE_AI_ASSISTANT.md)
 - [Deployment readiness, CI evidence, migration và rollback runbook](docs/DEPLOYMENT_READINESS.md)
 - [Shuffle/Telegram: hướng dẫn workflow từng node, trust và delivery](integrations/shuffle/WORKFLOWS.md)

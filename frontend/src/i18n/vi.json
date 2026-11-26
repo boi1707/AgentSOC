@@ -421,5 +421,6 @@
   "Awaiting system state": "Đang chờ trạng thái hệ thống",
   "Provider not recorded": "Chưa ghi nhận nhà cung cấp",
   "Analysis unavailable: ": "Phân tích không khả dụng: ",
-  "Data unavailable": "Dữ liệu không khả dụng"
+  "Data unavailable": "Dữ liệu không khả dụng",
+  "Stored verdict": "Kết luận đã lưu"
 }
