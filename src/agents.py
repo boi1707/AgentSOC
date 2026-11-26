@@ -57,12 +57,20 @@ def analyze(incident, anon, cid, llm, threshold=0.85, context=None):
     findings = {}
     valid = set()
     invalid_citations = False
+    retrieval = incident.get("indexer_retrieval")
+    context_ids = {a["id"] for a in safe if a.get("evidence_class") == "contextual"}
+    retrieval_instruction = (
+        " Evidence marked contextual is validated Sysmon process lineage; distinguish it from the primary alert. "
+        "Use it to support or contradict the primary evidence, never infer maliciousness from severity. "
+        "A missing Indexer match may reflect ingestion delay or the lookup scope. Identify evidence gaps explicitly."
+    )
     for kind, role in (("net", "net"), ("host", "host")):
         alerts = [a for a in safe if a["kind"] == kind or (role == "host" and a["kind"] == "generic")]
         ids = [a["id"] for a in alerts]
         valid.update(ids)
         if alerts:
-            finding = Finding.model_validate(llm.ask(anon, cid, role, SYSTEM[role], alerts, ids))
+            system = SYSTEM[role] + (retrieval_instruction if retrieval and role == "host" else "")
+            finding = Finding.model_validate(llm.ask(anon, cid, role, system, alerts, ids))
         else:
             finding = Finding(finding=f"No current {role} evidence; role skipped without a provider call.")
             if hasattr(llm, "skip"):
@@ -87,7 +95,11 @@ def analyze(incident, anon, cid, llm, threshold=0.85, context=None):
             "citable_for_current_verdict": False,
             "relationship": "Shared entities indicate correlation, not causation or proof of current attack.",
         }
-    verdict = Verdict.model_validate(llm.ask(anon, cid, "judge", SYSTEM["judge"], payload, ids))
+    system = SYSTEM["judge"]
+    if retrieval:
+        payload["indexer_retrieval_status"] = retrieval["status"]
+        system += retrieval_instruction + " Attack requires explicit support from at least one primary alert."
+    verdict = Verdict.model_validate(llm.ask(anon, cid, "judge", system, payload, ids))
     invalid_citations |= bool(
         (set(verdict.supporting_evidence) | set(verdict.contradicting_evidence)) - valid
     )
@@ -104,13 +116,11 @@ def analyze(incident, anon, cid, llm, threshold=0.85, context=None):
     if set(verdict.supporting_evidence) - set(kept) or verdict.contradicting_evidence or verdict.missing_data:
         verdict.verdict = "review"
         review_reason = "Contradictory, incomplete or inconsistent current-incident support"
+    primary_support = set(verdict.supporting_evidence) - context_ids
     if verdict.verdict == "attack" and (
-        not verdict.supporting_evidence
+        not primary_support
         or not verdict.reason.strip()
-        or not any(
-            f["suspicious"] and set(f["evidence_ids"]) & set(verdict.supporting_evidence)
-            for f in findings.values()
-        )
+        or not any(f["suspicious"] and set(f["evidence_ids"]) & primary_support for f in findings.values())
     ):
         verdict.verdict = "review"
         review_reason = "Attack requires explicit supporting current evidence and a current analyst finding"

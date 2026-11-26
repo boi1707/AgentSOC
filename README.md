@@ -343,6 +343,7 @@ không gửi Telegram, chạy SSH thật hoặc tiêu tiền cloud API. Live int
 - [Shuffle/Telegram: hướng dẫn workflow từng node, trust và delivery](integrations/shuffle/WORKFLOWS.md)
 - [Vận hành, Docker, local development, API và cấu hình](docs/OPERATIONS.md)
 - [Tích hợp TheHive, Shuffle, VirusTotal](docs/integrations.vi.md)
+- [Wazuh Indexer: truy xuất ngữ cảnh Sysmon theo phạm vi](docs/WAZUH_EVIDENCE_RETRIEVAL.md)
 - [Kết quả kiểm thử tích hợp và phạm vi xác minh](docs/validation-integrations.md)
 - [Kiến trúc và trạng thái](docs/ARCHITECTURE.md)
 - [Khảo sát AgentSOC/AiSOC, SHA và license](docs/ARCHITECTURE_COMPARISON.md)
