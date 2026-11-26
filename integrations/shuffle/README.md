@@ -27,6 +27,10 @@ Shuffle secrets, never workflow URLs, source control, logs, or Telegram messages
    and restrict this endpoint to Shuffle. Sign `timestamp + '.' + raw_body` with HMAC SHA-256.
    AgentSOC permits five minutes of clock skew. Keep both systems synchronized.
 5. Route the JSON reply through `query_text`; send plain text only to its returned `chat_id`.
+   Use the current helper: conversational replies prioritize the shared labelled fallback
+   or validated interpretation and include citation references, never normalized evidence JSON.
+   See [focused assistant fallback](../../docs/ASSISTANT_FOCUSED_FALLBACK.md). Updating source does
+   not automatically update the Python step of your deployed Shuffle workflow.
    Do not set Telegram `parse_mode`. Use the bot token in the Telegram app's secret credential field.
    Do not forward raw HTTP errors, server configuration, or full API JSON directly into a group chat.
 6. Use `/status`, `/incidents` (last 24 hours), `/dangerous`, `/pending`, `/review 24h`, `/incident <id>`, `/why <id>`,

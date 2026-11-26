@@ -128,7 +128,8 @@ def test_placeholder_is_never_available_and_retries_once(scenario, placeholder):
     assert result["model_status"] == "unavailable" and result["interpretation"] is None
     assert result["model_attempts"] == len(calls) == 2
     assert len(result["citations"]) == 4 and result["analysis"][0]["confidence"] == 0.92
-    assert result["model_error"] == "invalid_output"
+    assert result["model_error"] == "placeholder_output"
+    assert result["fallback"]["origin"] == "stored_analysis"
 
 
 def test_retry_is_smaller_grounded_and_does_not_echo_failed_output(scenario):
@@ -145,6 +146,8 @@ def test_retry_is_smaller_grounded_and_does_not_echo_failed_output(scenario):
     )
     prompts = [call["json"]["messages"] for call in calls]
     assert len(json.dumps(prompts[1])) < len(json.dumps(prompts[0]))
+    assert prompts[1][0]["content"] != prompts[0][0]["content"]
+    assert len(prompts[1][0]["content"]) < len(prompts[0][0]["content"])
     assert "IGNORE SYSTEM" not in json.dumps(prompts[1])
     assert result["interpretation"] == meaningful and result["model_status"] == "available"
     assert result["intent"] == "blocking_reason" and result["language"] == "vi"

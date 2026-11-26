@@ -35,6 +35,12 @@ type Answer = {
   notice: string;
   interpretation: string | null;
   model_status: string;
+  fallback?: {
+    origin: "stored_analysis";
+    label: string;
+    text: string;
+    truncated: boolean;
+  } | null;
   facts: Fact[];
   citations: Citation[];
   analysis: unknown[];
@@ -168,6 +174,14 @@ export function AssistantPanel() {
                     <p className="small muted">{message.answer.notice}</p>
                     {message.answer.model_status === "unavailable" && (
                       <p>{t("Model unavailable; evidence is still shown.")}</p>
+                    )}
+                    {message.answer.fallback && (
+                      <section aria-label={message.answer.fallback.label}>
+                        <h3>{message.answer.fallback.label}</h3>
+                        <p className="assistant-interpretation">
+                          {message.answer.fallback.text}
+                        </p>
+                      </section>
                     )}
                     {message.answer.truncated && (
                       <p>

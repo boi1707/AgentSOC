@@ -39,6 +39,12 @@ test("language switches immediately, persists, and assistant stays read-only", a
         notice: "Fixture",
         model_status: "unavailable",
         interpretation: null,
+        fallback: {
+          origin: "stored_analysis",
+          label: "Stored analysis / Evidence-based summary",
+          text: "ICMP từ 10.100.27.10 đến 172.22.50.10; Wazuh 100101, level 7. Kết luận đã lưu benign, confidence 0.92, grounded=1. Không đề xuất chặn IP vì bằng chứng không xác lập tấn công.",
+          truncated: false,
+        },
         truncated: false,
         citations: [],
         analysis: [],
@@ -77,9 +83,18 @@ test("language switches immediately, persists, and assistant stays read-only", a
   await page.getByLabel("Hỏi trợ lý").fill("Các sự cố gần đây");
   await page.getByRole("button", { name: "Gửi", exact: true }).click();
   const log = page.getByRole("log");
-  await expect(log.getByText(/10\.100\.27\.10.*172\.22\.50\.10/)).toBeVisible();
-  await expect(log.getByText(/Wazuh 100101/)).toBeVisible();
-  await expect(log.getByText(/Kết luận đã lưu/)).toBeVisible();
+  await expect(
+    log.getByText(/10\.100\.27\.10.*172\.22\.50\.10/).first(),
+  ).toBeVisible();
+  await expect(log.getByText(/Wazuh 100101/).first()).toBeVisible();
+  const fallback = log.getByRole("region", {
+    name: "Stored analysis / Evidence-based summary",
+  });
+  await expect(fallback.getByText(/Không đề xuất chặn IP/)).toBeVisible();
+  await expect(
+    log.getByRole("heading", { name: "Nhận định AI", exact: true }),
+  ).toHaveCount(0);
+  await expect(log.getByText(/Kết luận đã lưu/).first()).toBeVisible();
   await expect(log.getByRole("button")).toHaveCount(0);
   await page.getByRole("link", { name: "Incident", exact: true }).click();
   await expect(

@@ -199,21 +199,26 @@ def query_text(result):
     if "system" in result:
         state = result["system"]
         return f"AgentSOC: {state['response_mode']}\nWorker fresh: {state['worker_fresh']}\nBacklog: {state['backlog']}"
-    lines = [result["summary"], result["notice"]]
-    for fact in result.get("facts", [])[:10]:
+    # Use the same server-authored conclusion shown by Web; never dump evidence JSON.
+    lines = []
+    fallback = result.get("fallback")
+    if isinstance(fallback, dict) and fallback.get("origin") == "stored_analysis":
+        lines.extend([fallback["label"], fallback["text"]])
+    elif result.get("interpretation"):
+        lines.append("AI interpretation: " + result["interpretation"])
+    else:
+        # Compatibility with older AgentSOC responses: stored rationale, not new AI prose.
+        for analysis in result.get("analysis", [])[:3]:
+            lines.append(
+                f"Stored analysis {analysis['incident_id']}: {analysis['verdict']}, "
+                f"confidence={analysis['confidence']}; {str(analysis['reason'])[:220]}"
+            )
+    lines.extend([result["summary"], result["notice"]])
+    for fact in result.get("facts", [])[:3]:
         p = fact["proposal"]
         lines.append(
             f"{fact['incident_id']}: {fact['status']} / {fact['priority']}\nProposal {p['id']}; eligible={p['eligible']}; source={p['source_ip']}"
         )
-    for analysis in result.get("analysis", [])[:5]:
-        lines.append(
-            f"AI {analysis['incident_id']}: {analysis['verdict']}, confidence={analysis['confidence']}; {analysis['reason']}"
-        )
     for citation in result.get("citations", [])[:5]:
-        lines.append(
-            f"Evidence [{citation['source']}:{citation['id']}]: "
-            + json.dumps(citation["normalized"], ensure_ascii=False)[:500]
-        )
-    if result.get("interpretation"):
-        lines.append("AI: " + result["interpretation"])
+        lines.append(f"Evidence [{citation['source']}:{citation['id']}]")
     return "\n".join(lines)[:3500]
