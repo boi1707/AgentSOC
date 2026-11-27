@@ -6,9 +6,82 @@ from src.agents import SYSTEM, analyze
 from src.anon import Anon
 from src.incident import Grouper
 from src.service import Service
-from src.tools import ToolRequest, execute
+from src.tools import ToolBlocked, ToolRequest, execute
 from tests.conftest import snort
 from tests.test_sysmon_evidence import GUID, HASH, sysmon
+
+
+@pytest.mark.parametrize(
+    ("field", "identity", "unrelated"),
+    [
+        ("user", "a", "data"),
+        ("hostname", "si", "decision"),
+        ("user", "ann", "scanner"),
+    ],
+)
+def test_known_identity_does_not_match_unrelated_substrings(field, identity, unrelated):
+    anon = Anon()
+    safe = anon.obj({field: identity, "finding": f"{unrelated} ({identity})", unrelated: unrelated})
+    token = safe[field]
+    assert token.startswith(("USER_", "HOST_")) and anon.restore(token) == identity
+    assert safe["finding"] == f"{unrelated} ({token})"
+    assert safe[unrelated] == unrelated
+    assert not anon.leaks(json.dumps(safe))
+    assert anon.leaks(json.dumps({"finding": f"Seen ({identity})"}))
+    assert anon.leaks(json.dumps({field: identity}))
+
+
+def test_known_credentials_still_match_inside_longer_values():
+    anon = Anon(secrets=("fixture-configured",))
+    first_token = anon.obj({"username": "fixture-discovered"})["username"]
+    anon.obj({"password": "fixture-discovered"})
+    assert anon.obj({"username": "fixture-discovered"})["username"] == first_token
+    for secret in ("fixture-configured", "fixture-discovered"):
+        assert anon.leaks(json.dumps({"content": json.dumps({"value": f"pref{secret}suffix"})}))
+
+
+def test_serialized_nested_data_scans_escaped_values_and_preserves_tokens():
+    anon = Anon()
+    token = anon.obj({"username": "écho"})["username"]
+    safe = json.dumps({"content": json.dumps({"items": [{"username": token, "finding": "préécho"}]})})
+    assert not anon.leaks(safe)
+    unsafe = json.dumps({"content": json.dumps({"items": [{"finding": r"C:\Users\écho\test.txt"}]})})
+    assert anon.leaks(unsafe)
+
+
+@pytest.mark.parametrize("tool_name", ["incident_evidence", "related_alerts"])
+def test_tools_keep_safe_results_and_block_real_leaks(settings, tool_name):
+    service = Service(settings)
+    service.store.ingest(sysmon(aid="older-event"))
+    service.tick(10**12)
+    service.store.ingest(sysmon(aid="latest-event", user="a", targetFilename=r"C:\ProgramData\data.txt"))
+    service.tick(10**12)
+    case = next(case for case in service.store.cases() if case["incident"]["raw_ids"] == ["latest-event"])
+    run = service.store.get_run(case["latest_run_id"])
+    assert run["status"] == "completed"
+    kwargs = {"entity": next(e for e in run["evidence"]["entities"] if e.startswith("host:"))}
+    request = ToolRequest(name=tool_name, run_id=run["id"], **kwargs)
+    anon = Anon()
+    anon.obj({"user": "a"})
+    result = execute(service.store, request, anon, incident_id=case["id"])
+    assert [item["id"] for item in result.items] == [
+        "latest-event" if tool_name == "incident_evidence" else "older-event"
+    ]
+
+    class LeakingAnon(Anon):
+        def obj(self, value):
+            safe = super().obj(value)
+            safe["result"]["items"][0]["username"] = "fixture-unmasked"
+            return safe
+
+    with pytest.raises(ToolBlocked, match="privacy guard refused"):
+        execute(service.store, request, LeakingAnon(), incident_id=case["id"])
+    with service.store.connect() as db:
+        row = db.execute(
+            "SELECT prompt,response,error FROM ledger WHERE run_id=? AND tool_name=? ORDER BY rowid DESC",
+            (run["id"], tool_name),
+        ).fetchone()
+    assert tuple(row) == ("{}", None, "Blocked")
 
 
 def test_nested_identity_tokens_are_order_independent_and_reversible():
@@ -65,6 +138,12 @@ def test_nested_identity_tokens_are_order_independent_and_reversible():
         "tool --token=privatevalue",
         "Authorization: Bearer opaque_private_token",
         "tool --user Alice",
+        r"C:\Users\fixture-user\notes.txt",
+        "/home/fixture-user/notes.txt",
+        "10.44.0.10",
+        "fd00::1",
+        "privacy-fixture@example.org",
+        "tool --api-key fixture-token",
     ],
 )
 def test_new_egress_patterns_work_without_discovery(raw):
@@ -72,6 +151,12 @@ def test_new_egress_patterns_work_without_discovery(raw):
     assert anon.leaks(raw)
     safe = anon.clean(raw)
     assert safe != raw and not anon.leaks(safe)
+
+
+def test_public_ipv4_stays_visible():
+    anon = Anon()
+    assert anon.clean("8.8.8.8") == "8.8.8.8"
+    assert not anon.leaks("8.8.8.8")
 
 
 def test_schema_role_and_identifier_metadata_remain_usable():
