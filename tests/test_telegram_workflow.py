@@ -13,6 +13,8 @@ from integrations.shuffle.agentsoc_bridge import (
     trusted_callback_request,
 )
 from src.shuffle import deliver_pending
+from src.storage import Store
+from src.thehive import sync_pending
 from tests.test_upgrade import incident
 
 INGRESS_SECRET = "lab-telegram-ingress-not-a-real-secret"
@@ -98,6 +100,61 @@ def assert_single_decision(flow, expected="dry_run", actor=None):
         )
         rows = db.execute("SELECT payload FROM shuffle_outbox").fetchall()
         assert len(rows) == 1 and json.loads(rows[0][0])["blocked"] is False
+
+
+@pytest.mark.parametrize(("decision", "expected"), [("a", "dry_run"), ("i", "rejected")])
+def test_signed_decision_updates_same_thehive_case_after_restart(flow, decision, expected):
+    _, settings, case, service, _ = flow
+    settings.thehive_url = "https://thehive.invalid"
+    settings.thehive_key = "h" * 32
+    writes = []
+    reject_next_patch = False
+
+    def thehive(request):
+        nonlocal reject_next_patch
+        if request.url.path == "/api/v1/query":
+            return httpx.Response(200, json=[])
+        description = json.loads(request.content)["description"]
+        writes.append((request.method, request.url.path, json.loads(description.split("\n", 1)[1])))
+        if request.method == "PATCH" and reject_next_patch:
+            reject_next_patch = False
+            return httpx.Response(503)
+        return (
+            httpx.Response(201, json={"_id": "~fixture-42"})
+            if request.method == "POST"
+            else httpx.Response(204)
+        )
+
+    transport = httpx.MockTransport(thehive)
+    sync_pending(service.store, settings, transport=transport)
+    assert writes[0][:2] == ("POST", "/api/v1/case")
+    event = update(case, action=decision)
+    result = callback(flow, event)
+    assert result.status_code == 200 and result.json()["status"] == expected
+    assert callback(flow, event).status_code == 200
+    assert_single_decision(flow, expected, actor="admin")
+    reject_next_patch = True
+    sync_pending(service.store, settings, transport=transport)
+    assert writes[-1][:2] == ("PATCH", "/api/v1/case/~fixture-42") and not reject_next_patch
+    restarted = Store(settings.db)
+    with restarted.connect() as db:
+        (pending,) = db.execute("SELECT remote_id,error FROM thehive_sync WHERE case_id=?", (case["id"],))
+        assert pending["remote_id"] == "~fixture-42" and pending["error"] == "HTTP503"
+        db.execute("UPDATE thehive_sync SET available=0 WHERE case_id=?", (case["id"],))
+        (entry,) = db.execute("SELECT action,ip,result FROM actions WHERE case_id=?", (case["id"],))
+        assert entry["result"] == expected
+        if decision == "i":
+            assert entry["action"] == "reject" and entry["ip"] is None
+    sync_pending(restarted, settings, transport=transport)
+    assert sum(method == "POST" for method, _, _ in writes) == 1
+    method, path, mirror = writes[-1]
+    assert (method, path) == ("PATCH", "/api/v1/case/~fixture-42")
+    assert mirror["agentsoc_case_id"] == case["id"] and mirror["status"] == expected
+    assert set(mirror["evidence_ids"]) == set(case["incident"]["raw_ids"])
+    with restarted.connect() as db:
+        assert (
+            db.execute("SELECT error FROM thehive_sync WHERE case_id=?", (case["id"],)).fetchone()[0] is None
+        )
 
 
 def test_proactive_two_chat_inline_buttons_and_signed_approval_round_trip(flow):
