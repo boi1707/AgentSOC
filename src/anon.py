@@ -78,6 +78,10 @@ def structural(key, value):
     return isinstance(value, str) and value in STRUCTURE.get(key, ())
 
 
+def _identity_pattern(value):
+    return r"(?<!\w)" + re.escape(value) + r"(?!\w)"
+
+
 def internal(value):
     ip = ipaddress.ip_address(value.strip("[]"))
     return ip.version == 6 or not ip.is_global
@@ -87,6 +91,7 @@ class Anon:
     def __init__(self, hosts=("win-victim", "gateway", "kali"), *, secrets=()):
         self.fwd, self.rev, self.count = {}, {}, {}
         self.secrets = tuple(v for v in secrets if v)
+        self._known_secrets = set()
         names = [re.escape(h) for h in hosts if h]
         self.host = re.compile(
             r"\b(?:DESKTOP-[A-Z0-9]{5,}" + ("|" + "|".join(names) if names else "") + r")\b", re.I
@@ -95,6 +100,8 @@ class Anon:
     def tok(self, kind, value):
         if TOKEN.fullmatch(value):
             return value
+        if kind == "SECRET":
+            self._known_secrets.add(value)
         if value not in self.fwd:
             self.count[kind] = self.count.get(kind, 0) + 1
             token = f"{kind}_{self.count[kind]:04d}"
@@ -109,7 +116,7 @@ class Anon:
         # Reuse their existing token when the same entity appears in tool arguments or prose.
         for value in sorted(self.fwd, key=len, reverse=True):
             if value and value.lower() not in RESERVED:
-                text = re.sub(r"(?<!\w)" + re.escape(value) + r"(?!\w)", lambda _: self.fwd[value], text)
+                text = re.sub(_identity_pattern(value), lambda _: self.fwd[value], text)
         text = ARG_SECRET.sub(lambda m: m["prefix"] + self.tok("SECRET", m["value"]), text)
         text = BEARER.sub(lambda m: m[1] + self.tok("SECRET", m[2]), text)
         text = ARG_USER.sub(lambda m: m[0].replace(m[1], self.tok("USER", m[1])), text)
@@ -251,8 +258,20 @@ class Anon:
             parsed = text
         scanned = "\n".join(strings(parsed))
         found = typed_leaks + [v for v in self.secrets if v and (v in scanned or v in text)]
+        # Credentials may be embedded in a larger string. Check even when the
+        # same value was first tokenized under another category.
+        found.extend(v for v in sorted(self._known_secrets) if v and v in scanned)
         text = TOKEN.sub("", scanned)
-        found.extend(v for v in self.fwd if v and v.lower() not in RESERVED and v in text)
+        for value, token in self.fwd.items():
+            if not value or value.lower() in RESERVED or value in self._known_secrets:
+                continue
+            if token.startswith(("USER_", "HOST_")):
+                # Match names at the same boundaries as clean(). The dedicated
+                # path, account and DNS checks below still apply independently.
+                if re.search(_identity_pattern(value), text):
+                    found.append(value)
+            elif value in text:
+                found.append(value)
         for pattern in (SECRET, EMAIL, self.host, USER, ACCOUNT, SID, DNS):
             found.extend(
                 m.group()
