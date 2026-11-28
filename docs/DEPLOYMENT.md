@@ -75,6 +75,36 @@ Telegram là tùy chọn, chỉ gửi ID/verdict; failure không làm mất run.
 Giữ các mẫu gateway hiện có để tương thích; không load `config/gateway.nft` lên firewall hiện hữu
 như một phần của việc nâng cấp console.
 
+### Mạng được bảo vệ khi xét đích phản ứng
+
+AgentSOC mặc định bảo vệ `10.8.0.0/24`, `192.168.10.0/24`, `127.0.0.0/8` và
+`169.254.0.0/16`. `PROTECTED_NETWORKS` bổ sung các mạng IPv4 cho từng triển khai.
+Để trống hoặc bỏ biến sẽ giữ cả bốn mạng. Các mục được phân cách bằng dấu phẩy, bỏ khoảng
+trắng quanh từng mục và bỏ mạng trùng theo thứ tự xuất hiện. Dùng địa chỉ mạng kèm độ dài
+prefix, hoặc `/32` nếu chỉ bảo vệ một host. IPv6, địa chỉ thiếu prefix, netmask dạng chấm,
+prefix không hợp lệ, mục rỗng giữa các dấu phẩy và CIDR có host bit đều làm startup thất bại.
+
+Ví dụ cho topology đã mô tả trong đợt rà soát:
+
+```dotenv
+LLM_MODE=live
+RESPONSE_MODE=dry-run
+PFSENSE_LIVE_ENABLED=0
+PROTECTED_NETWORKS=192.168.119.0/24,172.22.50.0/24,10.100.27.254/32
+```
+
+Giữ giá trị `GATEWAY` hiện có nếu là địa chỉ IPv4 hợp lệ. Backend và worker dùng chung
+`env_file: .env` trong Compose, kiểm tra cả hai biến khi khởi động và luôn bảo vệ
+`GATEWAY` dưới dạng `/32`, kể cả trong dry-run. `PROTECTED_NETWORKS` từ chối đích phản ứng
+trong các dải đã khai báo. `PFSENSE_ALLOWED_NETWORKS` giới hạn riêng phạm vi nguồn được phép
+của adapter pfSense. Ví dụ trên vẫn để `10.100.27.10/32` ngoài danh sách mạng bị bảo vệ.
+
+Trước rollout, xác nhận topology, sao lưu SQLite và ghi lại digest image cùng cấu hình
+hiện hành. Thử trên staging dùng bản sao SQLite, kiểm tra cả hai service nhận cùng cấu
+hình, readiness và từ chối các địa chỉ hạ tầng với evidence đã được trích dẫn. Khi rollback
+image, xác minh lại phạm vi bảo vệ. Image cũ bỏ qua `PROTECTED_NETWORKS`, nên giữ dry-run
+và tạm dừng thao tác duyệt cho đến khi khôi phục guard. Thay đổi này không thêm migration.
+
 ## Demo Docker tách riêng
 
 ```bash
