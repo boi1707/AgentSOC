@@ -80,8 +80,10 @@ def create_app(settings=None, *, worker=None, managed_transport=None, managed_cl
     app = FastAPI(title="AgentSOC", version="0.1.0", lifespan=lifespan)
     app.include_router(v1_router)
     from src.api.assistant import router as assistant_router
+    from src.api.copilot import router as copilot_router
 
     app.include_router(assistant_router)
+    app.include_router(copilot_router)
 
     @app.get("/live")
     def live():

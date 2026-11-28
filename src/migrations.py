@@ -194,4 +194,9 @@ def _apply(db, *, host_ips=None):
     )
     db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(3,?)", (time.time(),))
     db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (time.time(),))
+    from .copilot import SCHEMA as COPILOT_SCHEMA
+
+    for statement in COPILOT_SCHEMA:
+        db.execute(statement)
+    db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(5,?)", (time.time(),))
     db.commit()

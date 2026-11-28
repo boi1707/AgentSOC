@@ -2269,7 +2269,11 @@ function Shell({ actor, logout }: { actor: Actor; logout: () => void }) {
             </footer>
           </main>
         </div>
-        <AssistantPanel />
+        <AssistantPanel
+          key={actor.username}
+          username={actor.username}
+          role={actor.role}
+        />
       </div>
     </Session.Provider>
   );

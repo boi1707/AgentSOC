@@ -241,4 +241,4 @@ def test_v3_upgrade_preserves_existing_ip_budget_and_historical_records(tmp_path
         assert db.execute("SELECT ip,status FROM vt_jobs").fetchone()[:] == ("8.8.8.8", "pending")
         assert db.execute("SELECT count(*) FROM vt_cache").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM vt_hash_jobs").fetchone()[0] == 0
-        assert {r[0] for r in db.execute("SELECT version FROM schema_migrations")} == {1, 2, 3, 4}
+        assert {r[0] for r in db.execute("SELECT version FROM schema_migrations")} == {1, 2, 3, 4, 5}
