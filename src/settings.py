@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 from .response_adapters import PFSENSE_ALIAS, PFSENSE_LAB_TARGET, PFSENSE_MAX_TTL, PfSenseAdapter
 
+DEFAULT_PROTECTED_NETWORKS = ("10.8.0.0/24", "192.168.10.0/24", "127.0.0.0/8", "169.254.0.0/16")
+
 
 @dataclass
 class Settings:
@@ -31,7 +33,7 @@ class Settings:
     log_component: str = ""
     host_ips: dict = field(default_factory=lambda: {"10.8.0.3": "192.168.10.20"})
     hosts: tuple = ("win-victim", "gateway", "kali")
-    protected: tuple = ("10.8.0.0/24", "192.168.10.0/24", "127.0.0.0/8", "169.254.0.0/16")
+    protected: tuple[str, ...] = DEFAULT_PROTECTED_NETWORKS
     gateway: str = "10.8.0.2"
     ssh_key: str = "data/block_key"
     known_hosts: str = "data/known_hosts"
@@ -79,6 +81,8 @@ class Settings:
     @classmethod
     def from_env(cls):
         load_dotenv()
+        protected = os.getenv("PROTECTED_NETWORKS", "").strip()
+        additions = tuple(value.strip() for value in protected.split(",")) if protected else ()
         return cls(
             db=os.getenv("DEMO_DB", "data/demo/agentsoc.db")
             if os.getenv("DEMO_MODE", "0") == "1"
@@ -100,6 +104,7 @@ class Settings:
             log_component=os.getenv("LOG_COMPONENT", ""),
             host_ips=json.loads(os.getenv("HOST_IPS", '{"10.8.0.3":"192.168.10.20"}')),
             hosts=tuple(os.getenv("HOST_NAMES", "win-victim,gateway,kali").split(",")),
+            protected=tuple(dict.fromkeys((*DEFAULT_PROTECTED_NETWORKS, *additions))),
             gateway=os.getenv("GATEWAY", "10.8.0.2"),
             ssh_key=os.getenv("SSH_KEY", "data/block_key"),
             known_hosts=os.getenv("KNOWN_HOSTS", "data/known_hosts"),
@@ -180,6 +185,21 @@ class Settings:
         )
 
     def validate(self):
+        for network in self.protected:
+            try:
+                # IPv4Network also accepts bare addresses and dotted masks.
+                # The configuration contract requires canonical prefix notation.
+                if not isinstance(network, str) or not re.fullmatch(r"[^/]+/(?:0|[1-9][0-9]?)", network):
+                    raise ValueError
+                ipaddress.IPv4Network(network, strict=True)
+            except ValueError:
+                raise ValueError(
+                    "PROTECTED_NETWORKS requires comma-separated IPv4 CIDRs without host bits"
+                ) from None
+        try:
+            ipaddress.IPv4Address(self.gateway)
+        except ValueError:
+            raise ValueError("GATEWAY must be an IPv4 address") from None
         if self.shuffle_callback_secret and len(self.shuffle_callback_secret) < 32:
             raise ValueError("SHUFFLE_CALLBACK_SECRET requires at least 32 characters")
         if self.shuffle_callback_secret and self.shuffle_callback_secret in (
@@ -250,7 +270,6 @@ class Settings:
             if url.username or url.password or url.query or url.fragment:
                 raise ValueError("LLM_URL must not contain credentials, query or fragment")
         if self.response_mode == "ssh":
-            ipaddress.IPv4Address(self.gateway)
             if self.llm_mode != "live":
                 raise ValueError("Mock verdicts cannot execute SSH blocking")
         timings = (self.quiet, self.gap, self.poll)

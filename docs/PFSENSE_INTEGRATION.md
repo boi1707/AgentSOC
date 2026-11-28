@@ -121,6 +121,19 @@ The adapter additionally rejects management/LAN/WAN/gateway ranges including `10
 reserved addresses, and configured protected ranges. The application response policy must still
 bind future mitigation to server-side evidence and an individually authenticated decision.
 
+`PROTECTED_NETWORKS` is an additive denylist shared by the general response candidate
+guard and the pfSense adapter. Configure it as comma-separated IPv4 CIDRs in the shared
+Compose `.env`; the built-in ranges and the configured `GATEWAY` host remain protected.
+Malformed CIDRs or a non-IPv4 gateway fail startup in both the backend and worker,
+including dry-run. See the deployment example and rollback notes in
+[DEPLOYMENT.md](DEPLOYMENT.md#mạng-được-bảo-vệ-khi-xét-đích-phản-ứng).
+
+The pfSense adapter also requires a target to be in `PFSENSE_ALLOWED_NETWORKS` and the
+fixed lab scope `10.100.27.10/32`. A source in a protected range is rejected even if it
+matches the allowed scope. For the reviewed topology, protect `10.100.27.254/32` to
+cover the gateway while leaving the lab source outside the added ranges. pfSense writes
+remain disabled.
+
 For later, separately authorized read-only acceptance, use a disposable diagnostic container or
 one-shot lab override. Keep key and public CA files outside Git and mount both read-only. Restrict
 host key-file access to the intended container UID and operators. Example override fragment for the
