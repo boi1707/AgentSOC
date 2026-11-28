@@ -175,7 +175,7 @@ def dispatch(repo, settings, payload, user):
     if command == "/status":
         from src.api.v1 import health_snapshot
 
-        return {"system": health_snapshot(repo, settings)}
+        return {"system": health_snapshot(repo, settings), "language": payload.language}
     raise HTTPException(422, "Unsupported Telegram command. Use /help in a private bot chat.")
 
 

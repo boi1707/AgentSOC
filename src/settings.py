@@ -8,7 +8,13 @@ from urllib.parse import parse_qsl, urlsplit
 
 from dotenv import load_dotenv
 
-from .response_adapters import PFSENSE_ALIAS, PFSENSE_LAB_TARGET, PFSENSE_MAX_TTL, PfSenseAdapter
+from .response_adapters import (
+    PFSENSE_ALIAS,
+    PFSENSE_LAB_TARGET,
+    PFSENSE_MAX_TTL,
+    PFSENSE_WRITE_BLOCKER,
+    PfSenseAdapter,
+)
 
 DEFAULT_PROTECTED_NETWORKS = ("10.8.0.0/24", "192.168.10.0/24", "127.0.0.0/8", "169.254.0.0/16")
 
@@ -259,7 +265,9 @@ class Settings:
         if self.ingest_key == self.approve_key:
             raise ValueError("INGEST_KEY and APPROVE_KEY must be different")
         if self.pfsense_live_enabled or self.response_mode == "pfsense":
-            raise ValueError("pfSense mutation is unavailable; keep PFSENSE_LIVE_ENABLED=0")
+            raise ValueError(
+                f"pfSense mutation is unavailable ({PFSENSE_WRITE_BLOCKER}); keep PFSENSE_LIVE_ENABLED=0"
+            )
         PfSenseAdapter.validate_settings(self)
         if self.llm_mode not in {"mock", "live"} or self.response_mode not in {"dry-run", "ssh"}:
             raise ValueError("Invalid LLM_MODE or RESPONSE_MODE")

@@ -197,6 +197,8 @@
   "Replay uses a frozen snapshot and cannot execute a response. Model output may differ.": "Phân tích lại dùng bản chụp cố định và không thể ứng phó. Kết quả mô hình có thể khác.",
   "Response history": "Lịch sử ứng phó",
   "Response mode": "Chế độ ứng phó",
+  "pfSense live enforcement": "Chặn trực tiếp qua pfSense",
+  "Unavailable · read-only diagnostics": "Không khả dụng · chỉ đọc",
   "Response review": "Duyệt ứng phó",
   "Result": "Kết quả",
   "Return to overview": "Về tổng quan",

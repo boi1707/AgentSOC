@@ -19,6 +19,12 @@ PFSENSE_ALIAS = "AGENTSOC_BLOCKLIST"
 PFSENSE_MAX_TTL = 86400
 PFSENSE_LAB_TARGET = ipaddress.IPv4Network("10.100.27.10/32")
 PFSENSE_PROTECTED = ("10.8.0.0/24", "172.22.50.0/24", "192.168.119.0/24", "10.100.27.254/32")
+PFSENSE_WRITE_BLOCKER = "no_verified_write_transport"
+
+
+def pfsense_enforcement_status():
+    """Report the capability of this build without probing the firewall."""
+    return {"live_available": False, "reason": PFSENSE_WRITE_BLOCKER}
 
 
 @dataclass(frozen=True)
@@ -309,7 +315,7 @@ class PfSenseAdapter:
         return payload["data"]
 
     def block(self, plan: BlockPlan) -> str:
-        raise RuntimeError("Live pfSense mitigation is disabled pending separate authorization")
+        raise RuntimeError(f"Live pfSense mitigation is disabled ({PFSENSE_WRITE_BLOCKER})")
 
     def remove(self, plan: BlockPlan) -> str:
-        raise RuntimeError("Live pfSense mitigation is disabled pending separate authorization")
+        raise RuntimeError(f"Live pfSense mitigation is disabled ({PFSENSE_WRITE_BLOCKER})")
