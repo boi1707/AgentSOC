@@ -200,10 +200,68 @@ def test_natural_request_previews_only_and_requires_explicit_confirmation(consol
     assert not ask(console, url, other).json()["answer"].get("action_intent_id")
     query = "I want to block this source IP for 2 hours because the traffic warrants review."
     prepared = ask(console, url, query, key="preview").json()["answer"]["action_intent_id"]
-    assert ask(console, url, "Approve", key="chat-confirm").status_code == 200
+    ambiguous = ask(console, url, "Approve", key="chat-confirm").json()
+    assert "confirmation" not in ambiguous["answer"]
+    selected = ask(console, url, "Approve", key="selected", selected_intent_id=prepared).json()
+    assert selected["answer"]["confirmation"] == {"intent_id": prepared, "decision": "approve"}
+    other_thread = thread(console, incident_id=case["id"])
+    foreign = ask(console, other_thread, "Approve", selected_intent_id=prepared).json()["answer"]
+    assert "confirmation" not in foreign
     history = console.get(url).json()
     assert len(history["actions"]) == 1
     action = history["actions"][0]
     assert action["id"] == prepared and action["status"] == "prepared" and action["ttl"] == 7200
     with console.app.state.service.store.connect() as db:
         assert db.execute("SELECT count(*) FROM actions").fetchone()[0] == 0
+    assert (
+        console.post(url + "/actions/" + prepared, json={"decision": "approve"}).json()["status"] == "dry_run"
+    )
+
+
+def test_drafts_are_redacted_and_ordered_and_history_has_stable_cursor(console, settings):
+    url = thread(console)
+    other = thread(console)
+    draft = console.put(url + "/draft", json={"content": "Draft --token fixture-private", "revision": 2})
+    assert draft.status_code == 200 and "fixture-private" not in draft.text
+    assert console.put(url + "/draft", json={"content": "outdated", "revision": 1}).json() == draft.json()
+    assert console.get(url).json()["draft"] == draft.json()
+    assert console.get(other).json()["draft"]["content"] == ""
+    with console.app.state.service.store.connect() as db:
+        assert "fixture-private" not in db.execute("SELECT content FROM assistant_drafts").fetchone()[0]
+    for i in range(6):
+        assert ask(console, url, f"fixture history {i}", key=f"k{i}").status_code == 200
+    recent = console.get(url, params={"limit": 2}).json()
+    ask(console, url, "new arrival", key="new")
+    older = console.get(url, params={"limit": 2, "before": recent["before"]}).json()
+    oldest = console.get(url, params={"limit": 2, "before": older["before"]}).json()
+    assert [row["request_key"] for page in (oldest, older, recent) for row in page["messages"]] == [
+        "k0",
+        "k1",
+        "k2",
+        "k3",
+        "k4",
+        "k5",
+    ]
+    assert oldest["before"] is None
+    with console.app.state.service.store.connect() as db:
+        db.execute(
+            "INSERT INTO users(username,password_hash,role,created) VALUES(?,?,'viewer',?)",
+            ("other", auth.password_hash("temporary-fixture-password"), time.time()),
+        )
+    result = console.post(
+        "/api/v1/auth/login", json={"username": "other", "password": "temporary-fixture-password"}
+    )
+    console.headers["X-CSRF-Token"] = result.json()["csrf"]
+    assert console.get(url).status_code == 404
+    assert console.put(url + "/draft", json={"content": "denied", "revision": 10}).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "text", ["/history", "/incident fixture", "/pending", "/select " + "a" * 32, "What is its source?"]
+)
+def test_group_chat_cannot_read_or_select_private_copilot_state(console, settings, text):
+    telegram_settings(settings)
+    result = telegram(console, settings, text, "group", chat="-456").json()
+    assert result["error"]["code"] == 403 and "facts" not in result
+    with console.app.state.service.store.connect() as db:
+        assert not db.execute("SELECT 1 FROM assistant_channel_links").fetchone()

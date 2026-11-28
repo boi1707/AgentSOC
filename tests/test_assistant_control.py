@@ -166,7 +166,7 @@ def test_telegram_read_commands(console, settings, cmd):
     telegram_settings(settings)
     if cmd in {"/incident", "/why"}:
         cmd += " " + case["id"]
-    result = signed(console, settings, command(cmd)).json()
+    result = signed(console, settings, {**command(cmd), "chat_id": "123"}).json()
     assert result["facts"][0]["incident_id"] == case["id"] and result["language"] == "vi"
 
 

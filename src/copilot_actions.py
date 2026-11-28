@@ -38,6 +38,33 @@ def authorized(db, owner):
         raise HTTPException(403, "Approver or administrator required")
 
 
+def confirmation_preview(store, owner, tid, iid, *, db=None):
+    if db is None:
+        with store.connect() as connection:
+            return confirmation_preview(store, owner, tid, iid, db=connection)
+    authorized(db, owner)
+    owned(db, owner, tid, active=True)
+    row = db.execute(
+        """SELECT a.*,c.latest_run_id,c.status AS case_status,c.workflow_status
+           FROM assistant_action_intents a JOIN cases c ON c.id=a.case_id
+           WHERE a.id=? AND a.thread_id=?""",
+        (iid, tid),
+    ).fetchone()
+    if (
+        not row
+        or row["status"] != "prepared"
+        or row["expires"] <= time.time()
+        or row["run_id"] != row["latest_run_id"]
+        or row["case_status"] != "pending"
+        or row["workflow_status"] == "closed"
+    ):
+        raise HTTPException(409, "The selected intent is no longer prepared for this conversation")
+    value = preview(row)
+    for field in ("latest_run_id", "case_status", "workflow_status"):
+        del value[field]
+    return value
+
+
 def context(db, store, settings, cid, now):
     if (
         settings.response_mode != "dry-run"

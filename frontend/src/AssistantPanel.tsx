@@ -51,6 +51,7 @@ type Answer = {
   citations: Citation[];
   analysis: unknown[];
   related?: { incident_id: string; run_id: string; status: string }[];
+  confirmation?: { intent_id: string; decision: Decision };
   truncated: boolean;
 };
 type Thread = {
@@ -88,12 +89,17 @@ type History = {
   messages: Message[];
   actions: ResponseIntent[];
   before: number | null;
+  draft: Draft;
 };
+type Draft = { content: string; revision: number };
+type Decision = "approve" | "reject";
+type Older = Pick<History, "messages" | "before">;
 type Outbound = {
   request_key: string;
   message: string;
   incident_id: string | null;
   language: string;
+  selected_intent_id?: string;
 };
 const path = "/assistant/threads";
 
@@ -137,7 +143,16 @@ export function AssistantPanel({
     () => localStorage.getItem("agentsoc-copilot:" + username) ?? "",
   );
   const [details, setDetails] = useState<Record<string, History>>({});
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const draftVersions = useRef<Record<string, number>>({});
+  const draftChanges = useRef<Record<string, Draft>>({});
+  const [savingDrafts, setSavingDrafts] = useState<Record<string, boolean>>({});
+  const draftTimers = useRef<Record<string, number>>({});
+  const [older, setOlder] = useState<Record<string, Older>>({});
+  const loadingOlder = useRef(new Set<string>());
+  const [selectedIntents, setSelectedIntents] = useState<
+    Record<string, string>
+  >({});
   const [pending, setPending] = useState<Record<string, Outbound>>({});
   const sending = useRef(new Set<string>());
   const [busyIds, setBusyIds] = useState<string[]>([]);
@@ -153,26 +168,129 @@ export function AssistantPanel({
     /^\/console\/incidents\/([^/]+)$/,
   )?.[1];
   const current = details[selected];
-  const text = drafts[selected] ?? "";
-  const messages = current?.messages ?? [];
+  const selectedIntent = selectedIntents[selected];
+  const text = drafts[selected]?.content ?? "";
+  const before = older[selected] ? older[selected].before : current?.before;
+  const latest = current?.messages ?? [];
+  const messageIds = new Set(latest.map((message) => message.id));
+  const messages = [
+    ...(older[selected]?.messages ?? []).filter(
+      (message) => !messageIds.has(message.id),
+    ),
+    ...latest,
+  ];
   const busy = busyIds.includes(selected);
   const version = useRef<Record<string, number>>({});
   const setError = (id: string, error: string) =>
     setErrors((previous) => ({ ...previous, [id]: error }));
-  const reload = useCallback(async (id: string, before?: number) => {
+  const reload = useCallback(async (id: string) => {
     const serial = (version.current[id] ?? 0) + 1;
     version.current[id] = serial;
-    const next = await api<History>(
-      path + "/" + id + (before ? "?before=" + before : ""),
-    );
+    const next = await api<History>(path + "/" + id);
     if (version.current[id] !== serial) return;
-    setDetails((previous) => ({
-      ...previous,
-      [id]: before
-        ? { ...next, messages: [...next.messages, ...previous[id].messages] }
-        : next,
-    }));
+    setDetails((previous) => {
+      const stored = previous[id];
+      const merged = new Map(
+        stored?.messages.map((message) => [message.id, message]),
+      );
+      for (const message of next.messages) merged.set(message.id, message);
+      return {
+        ...previous,
+        [id]: {
+          ...next,
+          before: stored ? stored.before : next.before,
+          messages: [...merged.values()],
+        },
+      };
+    });
+    draftVersions.current[id] = Math.max(
+      draftVersions.current[id] ?? 0,
+      next.draft.revision,
+    );
+    setDrafts((previous) =>
+      (previous[id]?.revision ?? -1) < next.draft.revision
+        ? { ...previous, [id]: next.draft }
+        : previous,
+    );
   }, []);
+  async function loadOlder(id: string, cursor: number) {
+    if (loadingOlder.current.has(id)) return;
+    loadingOlder.current.add(id);
+    try {
+      const page = await api<History>(path + "/" + id + "?before=" + cursor);
+      setOlder((previous) => ({
+        ...previous,
+        [id]: {
+          before: page.before,
+          messages: [...page.messages, ...(previous[id]?.messages ?? [])],
+        },
+      }));
+    } catch (error) {
+      setError(
+        id,
+        error instanceof Error
+          ? error.message
+          : t("Assistant unavailable. Try again."),
+      );
+    } finally {
+      loadingOlder.current.delete(id);
+    }
+  }
+  const flushDraft = useCallback(async (id: string) => {
+    window.clearTimeout(draftTimers.current[id]);
+    const draft = draftChanges.current[id];
+    if (!draft) return;
+    try {
+      const saved = await api<Draft>(path + "/" + id + "/draft", {
+        method: "PUT",
+        keepalive: true,
+        body: JSON.stringify(draft),
+      });
+      if (draftChanges.current[id]?.revision === draft.revision) {
+        delete draftChanges.current[id];
+        setSavingDrafts((previous) => ({ ...previous, [id]: false }));
+      }
+      if (saved.revision > draft.revision) {
+        draftVersions.current[id] = Math.max(
+          draftVersions.current[id] ?? 0,
+          saved.revision,
+        );
+        setDrafts((previous) =>
+          previous[id]?.revision <= saved.revision
+            ? { ...previous, [id]: saved }
+            : previous,
+        );
+      }
+    } catch {
+      // Keep unsent text in memory and retry on blur, refresh, or the next edit.
+      setSavingDrafts((previous) => ({ ...previous, [id]: true }));
+    }
+  }, []);
+  useEffect(() => {
+    const flush = () => {
+      for (const id of Object.keys(draftChanges.current)) void flushDraft(id);
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("online", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("online", flush);
+      flush();
+    };
+  }, [flushDraft]);
+  function saveDraft(id: string, content: string) {
+    const revision = Math.max(
+      Date.now() * 1000,
+      (draftVersions.current[id] ?? 0) + 1,
+    );
+    draftVersions.current[id] = revision;
+    const draft = { content, revision };
+    draftChanges.current[id] = draft;
+    setDrafts((previous) => ({ ...previous, [id]: draft }));
+    setSavingDrafts((previous) => ({ ...previous, [id]: true }));
+    window.clearTimeout(draftTimers.current[id]);
+    draftTimers.current[id] = window.setTimeout(() => void flushDraft(id), 300);
+  }
   const listing = useCallback(async () => {
     const result = await api<{ items: Thread[]; more: boolean }>(path);
     setThreads(result.items);
@@ -217,6 +335,7 @@ export function AssistantPanel({
   async function ask(question: string, retry?: Outbound) {
     if (busy || !question.trim()) return;
     const reserved = selected;
+    const draftAtSend = drafts[reserved]?.revision;
     if (sending.current.has(reserved)) return;
     sending.current.add(reserved);
     let id = selected;
@@ -228,6 +347,7 @@ export function AssistantPanel({
         message: question,
         language,
         incident_id: context,
+        selected_intent_id: selectedIntents[id] || undefined,
         request_key: Array.from(
           crypto.getRandomValues(new Uint8Array(16)),
           (n) => n.toString(16).padStart(2, "0"),
@@ -240,11 +360,14 @@ export function AssistantPanel({
         method: "POST",
         body: JSON.stringify(payload),
       });
-      setDrafts((previous) =>
-        previous[reserved] === question
-          ? { ...previous, [reserved]: "" }
-          : previous,
-      );
+      if (
+        draftAtSend !== undefined &&
+        draftVersions.current[reserved] === draftAtSend &&
+        drafts[reserved]?.content === question
+      ) {
+        saveDraft(reserved, "");
+        void flushDraft(reserved);
+      }
       await reload(id);
       setPending((previous) => {
         const next = { ...previous };
@@ -270,7 +393,7 @@ export function AssistantPanel({
     });
     await Promise.all([listing(), reload(selected)]);
   }
-  async function action(id?: string, decision?: "approve" | "reject") {
+  async function action(id?: string, decision?: Decision) {
     if (actionBusy) return;
     const ownerThread = selected;
     setActionBusy(true);
@@ -460,14 +583,8 @@ export function AssistantPanel({
             ))}
           </div>
           <div className="assistant-messages" role="log" aria-live="polite">
-            {current?.before && (
-              <button
-                onClick={() =>
-                  void reload(selected, current.before ?? undefined).catch(
-                    (error) => setError(selected, error.message),
-                  )
-                }
-              >
+            {before && (
+              <button onClick={() => void loadOlder(selected, before)}>
                 {label("Older messages", "Tin nhắn cũ hơn")}
               </button>
             )}
@@ -478,160 +595,198 @@ export function AssistantPanel({
                 )}
               </p>
             )}
-            {messages.map((message) => (
-              <article key={message.id}>
-                <strong>{message.question}</strong>
-                {message.error && <p role="alert">{message.error}</p>}
-                {!message.answer && (
-                  <p>
-                    {message.status === "failed"
-                      ? label(
-                          "Request failed. Resend to retry.",
-                          "Yêu cầu lỗi. Gửi lại để thử tiếp.",
-                        )
-                      : label("Processing", "Đang xử lý")}
-                  </p>
-                )}
-                {message.answer && (
-                  <>
-                    <p>{message.answer.summary}</p>
-                    <p className="small muted">{message.answer.notice}</p>
-                    {message.answer.model_status === "unavailable" && (
-                      <p>{t("Model unavailable; evidence is still shown.")}</p>
-                    )}
-                    {message.answer.fallback && (
-                      <section aria-label={message.answer.fallback.label}>
-                        <h3>{message.answer.fallback.label}</h3>
-                        <Markdown text={message.answer.fallback.text} />
-                      </section>
-                    )}
-                    {message.answer.truncated && (
-                      <p>
-                        {t(
-                          "Results limited. Use the incident queue for all records.",
-                        )}
-                      </p>
-                    )}
-                    <h3>{t("Evidence-based facts")}</h3>
-                    {message.answer.facts.map((fact) => (
-                      <p key={fact.incident_id}>
-                        <Link
-                          to={
-                            "/console/incidents/" +
-                            encodeURIComponent(fact.incident_id)
-                          }
-                        >
-                          {fact.incident_id}
-                        </Link>
-                        {" · "}
-                        {t(fact.status)}
-                        {" · "}
-                        {t(fact.priority)}
-                        {" · Wazuh "}
-                        {fact.wazuh_level}
-                        {fact.proposal.source_ip && (
-                          <span className="mono">
-                            {" · "}
-                            {fact.proposal.source_ip}
-                          </span>
-                        )}
-                        <br />
-                        {t("Stored verdict")}:{" "}
-                        {fact.verdict ?? t("Data unavailable")}
-                        {" · "}
-                        {t("Confidence")}:{" "}
-                        {fact.confidence ?? t("Data unavailable")}
-                        {" · grounded="}
-                        {fact.grounded ?? "?"}
-                        {!!(
-                          fact.source_ips.length || fact.destination_ips.length
-                        ) && (
-                          <span className="mono">
-                            <br />
-                            {fact.source_ips.join(", ") || "?"} →{" "}
-                            {fact.destination_ips.join(", ") || "?"}
-                          </span>
-                        )}
-                        {fact.rules.map((rule) => (
-                          <span key={rule.evidence_id}>
-                            <br />
-                            Wazuh {rule.rule_id || "?"} · level{" "}
-                            {rule.level ?? "?"} · [{rule.evidence_id}]
-                          </span>
-                        ))}
-                        <br />
-                        {fact.policy_explanation}
-                        {fact.missing_evidence && (
-                          <span>
-                            {" · "}
-                            {t("Missing evidence")}
-                          </span>
-                        )}
-                        <br />
-                        <Link
-                          to={
-                            "/console/incidents/" +
-                            encodeURIComponent(fact.incident_id)
-                          }
-                        >
-                          {t("Open evidence and review proposal")}
-                        </Link>
-                      </p>
-                    ))}
-                    <details>
-                      <summary>{t("Evidence citations")}</summary>
-                      {message.answer.citations.map((citation) => (
-                        <div key={citation.incident_id + citation.id}>
+            {messages.map((message) => {
+              const requested = message.answer?.confirmation;
+              const intent = current?.actions.find(
+                (item) => item.id === requested?.intent_id,
+              );
+              return (
+                <article key={message.id}>
+                  <strong>{message.question}</strong>
+                  {message.error && <p role="alert">{message.error}</p>}
+                  {!message.answer && (
+                    <p>
+                      {message.status === "failed"
+                        ? label(
+                            "Request failed. Resend to retry.",
+                            "Yêu cầu lỗi. Gửi lại để thử tiếp.",
+                          )
+                        : label("Processing", "Đang xử lý")}
+                    </p>
+                  )}
+                  {message.answer && (
+                    <>
+                      <p>{message.answer.summary}</p>
+                      <p className="small muted">{message.answer.notice}</p>
+                      {requested && intent && (
+                        <section className="assistant-action">
+                          <p>
+                            {label("Selected intent", "Đề xuất đã chọn")}{" "}
+                            <code>{intent.id}</code>
+                          </p>
+                          <p>
+                            {intent.case_id} / {intent.run_id} · {intent.target}{" "}
+                            · {intent.mode} · {intent.status}
+                          </p>
+                          {canDecide &&
+                            intent.status === "prepared" &&
+                            !current?.thread.archived && (
+                              <button
+                                disabled={actionBusy}
+                                onClick={() =>
+                                  void action(intent.id, requested.decision)
+                                }
+                              >
+                                {requested.decision === "approve"
+                                  ? label("Confirm approval", "Xác nhận duyệt")
+                                  : label(
+                                      "Confirm rejection",
+                                      "Xác nhận từ chối",
+                                    )}
+                              </button>
+                            )}
+                        </section>
+                      )}
+                      {message.answer.model_status === "unavailable" && (
+                        <p>
+                          {t("Model unavailable; evidence is still shown.")}
+                        </p>
+                      )}
+                      {message.answer.fallback && (
+                        <section aria-label={message.answer.fallback.label}>
+                          <h3>{message.answer.fallback.label}</h3>
+                          <Markdown text={message.answer.fallback.text} />
+                        </section>
+                      )}
+                      {message.answer.truncated && (
+                        <p>
+                          {t(
+                            "Results limited. Use the incident queue for all records.",
+                          )}
+                        </p>
+                      )}
+                      <h3>{t("Evidence-based facts")}</h3>
+                      {message.answer.facts.map((fact) => (
+                        <p key={fact.incident_id}>
                           <Link
                             to={
-                              "/console/alerts/" +
-                              encodeURIComponent(citation.id)
+                              "/console/incidents/" +
+                              encodeURIComponent(fact.incident_id)
                             }
                           >
-                            [{citation.source}:{citation.id}]
+                            {fact.incident_id}
                           </Link>
-                        </div>
-                      ))}
-                    </details>
-                    {message.answer.related && (
-                      <details>
-                        <summary>
-                          {label(
-                            "Related investigations (historical)",
-                            "Điều tra liên quan (lịch sử)",
+                          {" · "}
+                          {t(fact.status)}
+                          {" · "}
+                          {t(fact.priority)}
+                          {" · Wazuh "}
+                          {fact.wazuh_level}
+                          {fact.proposal.source_ip && (
+                            <span className="mono">
+                              {" · "}
+                              {fact.proposal.source_ip}
+                            </span>
                           )}
-                        </summary>
-                        {message.answer.related.map((item) => (
-                          <p key={item.run_id}>
+                          <br />
+                          {t("Stored verdict")}:{" "}
+                          {fact.verdict ?? t("Data unavailable")}
+                          {" · "}
+                          {t("Confidence")}:{" "}
+                          {fact.confidence ?? t("Data unavailable")}
+                          {" · grounded="}
+                          {fact.grounded ?? "?"}
+                          {!!(
+                            fact.source_ips.length ||
+                            fact.destination_ips.length
+                          ) && (
+                            <span className="mono">
+                              <br />
+                              {fact.source_ips.join(", ") || "?"} →{" "}
+                              {fact.destination_ips.join(", ") || "?"}
+                            </span>
+                          )}
+                          {fact.rules.map((rule) => (
+                            <span key={rule.evidence_id}>
+                              <br />
+                              Wazuh {rule.rule_id || "?"} · level{" "}
+                              {rule.level ?? "?"} · [{rule.evidence_id}]
+                            </span>
+                          ))}
+                          <br />
+                          {fact.policy_explanation}
+                          {fact.missing_evidence && (
+                            <span>
+                              {" · "}
+                              {t("Missing evidence")}
+                            </span>
+                          )}
+                          <br />
+                          <Link
+                            to={
+                              "/console/incidents/" +
+                              encodeURIComponent(fact.incident_id)
+                            }
+                          >
+                            {t("Open evidence and review proposal")}
+                          </Link>
+                        </p>
+                      ))}
+                      <details>
+                        <summary>{t("Evidence citations")}</summary>
+                        {message.answer.citations.map((citation) => (
+                          <div key={citation.incident_id + citation.id}>
                             <Link
                               to={
-                                "/console/incidents/" +
-                                encodeURIComponent(item.incident_id)
+                                "/console/alerts/" +
+                                encodeURIComponent(citation.id)
                               }
                             >
-                              {item.incident_id}
-                            </Link>{" "}
-                            · {item.status}
-                          </p>
+                              [{citation.source}:{citation.id}]
+                            </Link>
+                          </div>
                         ))}
                       </details>
-                    )}
-                    <details>
-                      <summary>{t("Stored AI analysis")}</summary>
-                      <pre className="json">
-                        {JSON.stringify(message.answer.analysis, null, 2)}
-                      </pre>
-                    </details>
-                    {message.answer.interpretation && (
-                      <>
-                        <h3>{t("AI interpretation")}</h3>
-                        <Markdown text={message.answer.interpretation} />
-                      </>
-                    )}
-                  </>
-                )}
-              </article>
-            ))}
+                      {message.answer.related && (
+                        <details>
+                          <summary>
+                            {label(
+                              "Related investigations (historical)",
+                              "Điều tra liên quan (lịch sử)",
+                            )}
+                          </summary>
+                          {message.answer.related.map((item) => (
+                            <p key={item.run_id}>
+                              <Link
+                                to={
+                                  "/console/incidents/" +
+                                  encodeURIComponent(item.incident_id)
+                                }
+                              >
+                                {item.incident_id}
+                              </Link>{" "}
+                              · {item.status}
+                            </p>
+                          ))}
+                        </details>
+                      )}
+                      <details>
+                        <summary>{t("Stored AI analysis")}</summary>
+                        <pre className="json">
+                          {JSON.stringify(message.answer.analysis, null, 2)}
+                        </pre>
+                      </details>
+                      {message.answer.interpretation && (
+                        <>
+                          <h3>{t("AI interpretation")}</h3>
+                          <Markdown text={message.answer.interpretation} />
+                        </>
+                      )}
+                    </>
+                  )}
+                </article>
+              );
+            })}
             {current?.actions.map((item) => (
               <article key={item.id} className="assistant-action">
                 <h3>{label("Response preview", "Xem trước phản ứng")}</h3>
@@ -655,6 +810,18 @@ export function AssistantPanel({
                   item.status === "prepared" &&
                   !current.thread.archived && (
                     <>
+                      <button
+                        aria-pressed={selectedIntent === item.id}
+                        onClick={() =>
+                          setSelectedIntents((previous) => ({
+                            ...previous,
+                            [selected]:
+                              selectedIntent === item.id ? "" : item.id,
+                          }))
+                        }
+                      >
+                        {label("Select for chat", "Chọn để trò chuyện")}
+                      </button>
                       <button
                         disabled={actionBusy}
                         onClick={() => void action(item.id, "approve")}
@@ -734,16 +901,12 @@ export function AssistantPanel({
             <textarea
               id="assistant-question"
               value={text}
-              disabled={creating}
+              disabled={creating || !current || !!current.thread.archived}
               maxLength={2000}
               required
               placeholder={t("Ask the assistant")}
-              onChange={(event) =>
-                setDrafts((previous) => ({
-                  ...previous,
-                  [selected]: event.target.value,
-                }))
-              }
+              onChange={(event) => saveDraft(selected, event.target.value)}
+              onBlur={() => void flushDraft(selected)}
             />
             <button
               disabled={
@@ -753,6 +916,13 @@ export function AssistantPanel({
               {t("Send")}
             </button>
           </form>
+          {selected && !!drafts[selected]?.revision && (
+            <small role="status" className="muted">
+              {savingDrafts[selected]
+                ? label("Draft not yet saved", "Bản nháp chưa được lưu")
+                : label("Draft saved", "Đã lưu bản nháp")}
+            </small>
+          )}
         </section>
       )}
     </div>

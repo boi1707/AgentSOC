@@ -154,18 +154,9 @@ def dispatch(repo, settings, payload, user):
         result = conversation_command(repo, settings, payload, owner, command, parts)
         if result is not None:
             return result
-    elif command in {
-        "/new",
-        "/clear",
-        "/history",
-        "/use",
-        "/link",
-        "/analyze",
-        "/evidence",
-        "/prepare",
-        "/proposals",
-        "/confirm",
-    }:
+    elif command in {"/start", "/help"}:
+        return {"copilot_text": "Open a private chat with the bot to investigate or continue a conversation."}
+    elif command not in {"/status", "/approve", "/reject", "/ignore"}:
         raise HTTPException(403, "Use a private bot chat for conversation history or actions")
     if command in {"/approve", "/ignore", "/reject"}:
         if auth.ROLES.get(user["role"], -1) < auth.ROLES["approver"]:
@@ -185,36 +176,14 @@ def dispatch(repo, settings, payload, user):
         from src.api.v1 import health_snapshot
 
         return {"system": health_snapshot(repo, settings)}
-    if not command.startswith("/") or command == "/ask":
-        message = payload.command if command != "/ask" else " ".join(parts[1:])
-        if not message.strip():
-            raise HTTPException(422, "Question required")
-        return answer(repo, settings, Question(message=message, language=payload.language))
-    if command not in {"/incidents", "/dangerous", "/pending", "/review", "/incident", "/why"}:
-        raise HTTPException(
-            422,
-            "Supported: /status /incidents /dangerous /pending /review 24h /incident /why /ask /approve /ignore",
-        )
-    if command in {"/incident", "/why"} and len(parts) != 2:
-        raise HTTPException(422, "Incident ID required")
-    if command == "/review" and parts[1:] not in ([], ["24h"]):
-        raise HTTPException(422, "Supported review window: 24h")
-    return answer(
-        repo,
-        settings,
-        Question(
-            message=payload.command,
-            language=payload.language,
-            incident_id=parts[1] if command in {"/incident", "/why"} else None,
-        ),
-    )
+    raise HTTPException(422, "Unsupported Telegram command. Use /help in a private bot chat.")
 
 
 def conversation_command(repo, settings, payload, owner, command, parts):
     if command in {"/start", "/help"}:
         return {
             "copilot_text": "AgentSOC Copilot: /analyze <incident>, /history, /new, /use <thread>, "
-            "/link <code>, /evidence <incident>, /prepare <justification>, /proposals, "
+            "/link <code>, /evidence <incident>, /prepare <justification>, /proposals, /select <intent>, "
             "/confirm <intent> approve|reject. Use /clear to archive the current conversation."
         }
     if command in {"/link", "/use"}:
@@ -238,8 +207,17 @@ def conversation_command(repo, settings, payload, owner, command, parts):
                 db.execute("UPDATE assistant_threads SET archived=1 WHERE id=? AND owner=?", (tid, owner))
         tid = copilot.telegram_thread(repo, owner, payload, create_new=True)
         return {"copilot_text": "New conversation " + tid}
-    if command in {"/prepare", "/proposals", "/confirm"}:
+    if command in {"/prepare", "/proposals", "/confirm", "/select"}:
         tid = copilot.telegram_thread(repo, owner, payload)
+        if command == "/select":
+            if len(parts) != 2 or not re.fullmatch(r"[a-f0-9]{32}", parts[1]):
+                raise HTTPException(422, "Use /select <intent ID>")
+            copilot.telegram_intent(repo, owner, payload, tid, parts[1])
+            return {
+                "copilot_text": "Selected intent "
+                + parts[1]
+                + ". Say Approve or Reject to see its confirmation."
+            }
         if command == "/confirm":
             if len(parts) != 3:
                 raise HTTPException(422, "Use /confirm <intent> approve|reject")
@@ -283,8 +261,20 @@ def conversation_command(repo, settings, payload, owner, command, parts):
         language=payload.language,
         incident_id=parts[1] if command in {"/incident", "/why", "/analyze", "/evidence"} else None,
     )
-    exchange = copilot.ask(repo, settings, owner, tid, "tg-" + payload.update_id, question)
+    exchange = copilot.ask(
+        repo,
+        settings,
+        owner,
+        tid,
+        "tg-" + payload.update_id,
+        question,
+        selected_intent_id=copilot.telegram_intent(repo, owner, payload, tid),
+    )
     result = exchange["answer"]
+    if result and result.get("confirmation"):
+        confirmation = result["confirmation"]
+        action = copilot_actions.confirmation_preview(repo, owner, tid, confirmation["intent_id"])
+        return {"copilot_action": action, "confirmation_decision": confirmation["decision"]}
     if result and result.get("action_intent_id"):
         with repo.connect() as db:
             row = db.execute(

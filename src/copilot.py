@@ -32,6 +32,11 @@ SCHEMA = (
         target TEXT NOT NULL,evidence TEXT NOT NULL,judge TEXT NOT NULL,policy TEXT NOT NULL,
         justification TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,ttl INTEGER NOT NULL,
         status TEXT NOT NULL,action_id INTEGER,UNIQUE(thread_id,run_id))""",
+    """CREATE TABLE IF NOT EXISTS assistant_drafts(
+        thread_id TEXT PRIMARY KEY,content TEXT NOT NULL,revision INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS assistant_channel_intents(
+        owner TEXT NOT NULL,user_id TEXT NOT NULL,chat_id TEXT NOT NULL,thread_id TEXT NOT NULL,
+        intent_id TEXT NOT NULL,PRIMARY KEY(owner,user_id,chat_id))""",
 )
 MAX_THREADS = 100
 MAX_MESSAGES = 120
@@ -160,12 +165,32 @@ def history(store, owner, tid, limit=50, before=None):
             "SELECT * FROM assistant_action_intents WHERE thread_id=? ORDER BY created DESC LIMIT 20",
             (tid,),
         ).fetchall()
+        draft = db.execute(
+            "SELECT content,revision FROM assistant_drafts WHERE thread_id=?", (tid,)
+        ).fetchone()
     return {
         "thread": thread,
         "messages": [message(row) for row in reversed(rows[:limit])],
         "before": rows[limit - 1]["rowid"] if len(rows) > limit else None,
         "actions": [preview(row) for row in actions],
+        "draft": dict(draft) if draft else {"content": "", "revision": 0},
     }
+
+
+def save_draft(store, settings, owner, tid, content, revision):
+    content = redact(content, settings)[:2000]
+    with store.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        owned(db, owner, tid, active=True)
+        db.execute(
+            """INSERT INTO assistant_drafts VALUES(?,?,?)
+               ON CONFLICT(thread_id) DO UPDATE SET content=excluded.content,revision=excluded.revision
+               WHERE excluded.revision>assistant_drafts.revision""",
+            (tid, content, revision),
+        )
+        return dict(
+            db.execute("SELECT content,revision FROM assistant_drafts WHERE thread_id=?", (tid,)).fetchone()
+        )
 
 
 def message(row):
@@ -198,6 +223,8 @@ def compact_answer(value, settings):
                 "notice",
                 "interpretation",
                 "model_status",
+                "model_attempts",
+                "model_error",
                 "fallback",
                 "truncated",
             )
@@ -255,10 +282,21 @@ def related_context(store, settings, cid, owner):
     return items
 
 
-def ask(store, settings, owner, tid, key, question):
+def ask(store, settings, owner, tid, key, question, *, selected_intent_id=None):
     if not question.message.strip():
         raise HTTPException(422, "Question required")
-    digest = hashlib.sha256(question.model_dump_json().encode()).hexdigest()
+    command = folded(question.message)
+    decision = {
+        "approve": "approve",
+        "phe duyet": "approve",
+        "reject": "reject",
+        "tu choi": "reject",
+    }.get(command.strip(" .!?"))
+    selected_intent_id = selected_intent_id if decision else None
+    body = question.model_dump_json()
+    if selected_intent_id:
+        body += ":" + selected_intent_id
+    digest = hashlib.sha256(body.encode()).hexdigest()
     content = redact(question.message, settings)
     kind, specified = intent(question.model_copy(update={"incident_id": None}))
     now, claim = time.time(), uuid4().hex
@@ -275,7 +313,6 @@ def ask(store, settings, owner, tid, key, question):
         ):
             return message(previous)
         cid = previous["incident_id"] if previous else specified
-        command = folded(question.message)
         if not previous and not cid:
             if re.search(r"\b(?:latest incident|incident moi nhat|su co moi nhat)\b", command):
                 latest = db.execute("SELECT id FROM cases ORDER BY created DESC,id LIMIT 1").fetchone()
@@ -326,13 +363,27 @@ def ask(store, settings, owner, tid, key, question):
             (now, cid, tid),
         )
     try:
-        if command.strip(" .!?") in {"approve", "reject", "confirm", "phe duyet", "tu choi", "xac nhan"}:
+        if decision or command.strip(" .!?") in {"confirm", "xac nhan"}:
             result = clarification(question.language)
             result["summary"] = (
-                "Hãy xác nhận trên thẻ phản ứng tương ứng."
+                "Hãy chọn một đề xuất đang chờ rồi xác nhận trên thẻ phản ứng."
                 if question.language == "vi"
-                else "Use the confirmation buttons on the specific response preview."
+                else "Select a prepared intent, then use its confirmation control."
             )
+            if selected_intent_id:
+                from .copilot_actions import confirmation_preview
+
+                try:
+                    confirmation_preview(store, owner, tid, selected_intent_id)
+                except HTTPException as exc:
+                    result["summary"] = exc.detail
+                else:
+                    result["confirmation"] = {"intent_id": selected_intent_id, "decision": decision}
+                    result["summary"] = (
+                        "Hãy kiểm tra đề xuất đã chọn và xác nhận quyết định."
+                        if question.language == "vi"
+                        else "Review the selected intent and confirm your decision."
+                    )
         elif prepare_requested(content):
             result = prepare_from_message(
                 store, settings, owner, tid, cid, question.message, content, question.language
@@ -429,4 +480,31 @@ def telegram_thread(store, owner, payload, *, create_new=False, code=None, selec
         db.execute(
             "INSERT OR REPLACE INTO assistant_channel_links VALUES(?,?,?,?)", (owner, sender, chat, tid)
         )
+        db.execute(
+            "DELETE FROM assistant_channel_intents WHERE owner=? AND user_id=? AND chat_id=?",
+            (owner, sender, chat),
+        )
         return tid
+
+
+def telegram_intent(store, owner, payload, tid, selection=None):
+    from .copilot_actions import confirmation_preview
+
+    key = (owner, payload.user_id, payload.chat_id, tid)
+    with store.connect() as db:
+        if selection:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute(
+                "SELECT 1 FROM assistant_channel_links WHERE owner=? AND user_id=? AND chat_id=? AND thread_id=?",
+                key,
+            ).fetchone():
+                raise HTTPException(409, "Telegram conversation selection changed")
+            confirmation_preview(store, owner, tid, selection, db=db)
+            db.execute(
+                "INSERT OR REPLACE INTO assistant_channel_intents VALUES(?,?,?,?,?)", (*key, selection)
+            )
+        row = db.execute(
+            "SELECT intent_id FROM assistant_channel_intents WHERE owner=? AND user_id=? AND chat_id=? AND thread_id=?",
+            key,
+        ).fetchone()
+        return row["intent_id"] if row else None

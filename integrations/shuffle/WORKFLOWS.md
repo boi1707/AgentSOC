@@ -59,7 +59,7 @@ them. Never replay the approval to repair a message.
 | B2: validate, normalize and sign (Python) | Call `trusted_callback_request(headers, update, webhook_secret, signing_secret, language='vi')`. | Exact raw UTF-8 body string plus HMAC headers. Text commands use `message.from.id`; inline callbacks use `callback_query.from.id`, never the bot's message author. |
 | B3: AgentSOC HTTP request | POST to the private `/api/v1/integrations/telegram` URL. Use returned headers and exact raw body bytes/string, not a JSON object that the HTTP app reserializes. Verify TLS. | Require successful authentication; check JSON `error` even on HTTP 200. HTTP 401/403/409 are not approvals. |
 | B4: callback acknowledgement | For inline callbacks, use Telegram `answerCallbackQuery` with the original `callback_query.id` and a short receipt/denial text. | This only removes the Telegram spinner. Ack failures must not create a new update ID or re-execute a decision. |
-| B5: command reply formatting | For queries and textual commands, use `query_text(result)` and the `chat_id` returned by AgentSOC. Send plain text only. | Query replies are bounded. Approve/Ignore return a receipt only; the final result comes exclusively through Workflow A's `response.completed`. Do not send two final decision messages. |
+| B5: command reply formatting | Use `query_reply(result)`. Send the resulting object as JSON to Telegram `sendMessage`, including nested `reply_markup` when present. Leave `parse_mode` unset. | Check HTTP 2xx and Telegram `ok=true`. The legacy standard approval returns a receipt; workflow A sends its final result. Copilot previews can include signed intent buttons. If no inline buttons can be forwarded, the preview text includes the explicit confirmation command. |
 
 ```python
 prepared = trusted_callback_request(
@@ -69,11 +69,11 @@ prepared = trusted_callback_request(
 # Do not place any secret in the callback URL or Telegram callback_data.
 ```
 
-Text commands remain `/status`, `/incidents`, `/pending`, `/review 24h`, `/incident <id>`, `/why <id>`,
-`/approve <incident_id> <proposal_id>`, `/ignore <incident_id> <proposal_id>` (`/reject` alias).
+Investigation commands such as `/incidents`, `/pending`, `/review 24h`, `/incident <id>`, and `/why <id>` require a private bot chat. Group chats retain `/status`, help, and legacy `/approve <incident_id> <proposal_id>` and `/ignore <incident_id> <proposal_id>` (`/reject` alias) for authenticated mapped approvers. Group chats cannot open private threads or confirm Copilot intents.
 
 Inline callback data is `as:a:<analysis_run_id>` or `as:i:<analysis_run_id>` (37 ASCII bytes for the
-existing 32-character run IDs, below Telegram's 64-byte limit). The bridge signs `/callback` plus
+existing 32-character run IDs, below Telegram's 64-byte limit). Private Copilot preview buttons use
+`ac:a:<intent_id>` or `ac:i:<intent_id>`. The bridge signs `/callback` plus
 `callback_data` and `callback_query_id`. AgentSOC resolves the run to its incident, rechecks that
 it is the current completed non-replay analysis, and validates expiry/role/protected IP/pending state
 in the shared atomic approval flow. A message's old eligibility label or attacker-edited text grants
@@ -93,7 +93,7 @@ incident-state inspection. Cached results do not cause another action or result 
    evidence and both buttons. Compare incident/run IDs with Web.
 4. Click Approve as the authorized person. Verify `dry_run`, `blocked=false`, `not_verified`, one
    action/claimed transition, attributed actor and one logical result event. Check the same status
-   through Web and `/incident`. Race a second operator and Web against the same proposal.
+   through Web and `/incident` in the private test chat. Race a second operator and Web against the same proposal.
 5. Test Ignore, expiry/stale run, invalid HMAC, expired timestamp, duplicate update and changed-content
    update reuse. None may create duplicate mitigation actions.
 6. Fail one recipient delivery before acceptance; retry the same event and verify only that recipient
@@ -101,3 +101,11 @@ incident-state inspection. Cached results do not cause another action or result 
 
 These manual checks are **REQUIRES LIVE LAB**. Local pytest coverage uses ASGI/SQLite plus mocked
 Shuffle/Telegram HTTP and is classified **MOCKED**, not a live workflow validation.
+
+## Copilot staging acceptance
+
+1. In an isolated Shuffle workflow, run nodes B1–B5 with the updated bridge and a test bot. Verify the outbound `sendMessage` JSON retains the nested `inline_keyboard`, the bot renders both buttons, and the API returns `ok=true` with a `message_id`.
+2. Link a Web thread to a mapped private test account. Ask a follow-up in Telegram and check its cited incident and history in Web. From a group, attempt the same query and thread link. Expect a refusal with no history or evidence in the reply.
+3. Use a legitimate received lab incident whose stored verdict is `review`. Prepare a manual response with human justification. Typing Approve without selection must present no control. Use `/select INTENT_ID`, type Approve, and verify that only the selected intent can be confirmed.
+4. Click the delivered button with a valid identity. Repeat the same callback, retry from Web, and try a forged and an expired callback. Verify exactly one dry-run action, `blocked=false`, and one result outbox event. Repeat with Reject on a fresh incident.
+5. Compare the case status in Web, Telegram and the same TheHive remote case. Verify the original Judge verdict before and after. Run migration and rollback on disposable database copies as described in the [Copilot guide](../../docs/UNIFIED_COPILOT.md#deployment-and-rollback).

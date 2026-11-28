@@ -19,6 +19,13 @@ class ThreadEdit(BaseModel):
 
 class Exchange(Question):
     request_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+    selected_intent_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+class Draft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(max_length=2000)
+    revision: int = Field(ge=1, le=9007199254740991, strict=True)
 
 
 class Prepare(BaseModel):
@@ -102,17 +109,40 @@ def delete_thread(tid: str, request: Request, actor=Depends(auth.principal)):
         db.execute("DELETE FROM assistant_channel_links WHERE thread_id=?", (tid,))
         db.execute("DELETE FROM assistant_link_tokens WHERE thread_id=?", (tid,))
         db.execute("DELETE FROM assistant_messages WHERE thread_id=?", (tid,))
+        db.execute("DELETE FROM assistant_drafts WHERE thread_id=?", (tid,))
+        db.execute("DELETE FROM assistant_channel_intents WHERE thread_id=?", (tid,))
         db.execute("DELETE FROM assistant_threads WHERE id=?", (tid,))
         return {"deleted": True}
 
 
 @router.post("/{tid}/messages")
 def send(tid: str, payload: Exchange, request: Request, actor=Depends(auth.principal)):
-    question = Question(**payload.model_dump(exclude={"request_key", "history"}))
+    question = Question(**payload.model_dump(exclude={"request_key", "history", "selected_intent_id"}))
     return safe(
         request,
         copilot.ask(
-            store(request), request.app.state.settings, actor.username, tid, payload.request_key, question
+            store(request),
+            request.app.state.settings,
+            actor.username,
+            tid,
+            payload.request_key,
+            question,
+            selected_intent_id=payload.selected_intent_id,
+        ),
+    )
+
+
+@router.put("/{tid}/draft")
+def save_draft(tid: str, payload: Draft, request: Request, actor=Depends(auth.principal)):
+    return safe(
+        request,
+        copilot.save_draft(
+            store(request),
+            request.app.state.settings,
+            actor.username,
+            tid,
+            payload.content,
+            payload.revision,
         ),
     )
 

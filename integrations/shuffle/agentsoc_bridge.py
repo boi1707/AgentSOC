@@ -199,7 +199,10 @@ def query_text(result):
         action = result["copilot_action"]
         if action["status"] != "prepared":
             return f"Intent {action['id']}: {action['status']}; dry-run; blocked=false"
-        return (
+        decision = result.get("confirmation_decision")
+        commands = [decision] if decision in {"approve", "reject"} else ["approve", "reject"]
+        suffix = "\n" + "\n".join(f"/confirm {action['id']} {choice}" for choice in commands)
+        details = (
             f"Intent {action['id']} · {action['approval_policy']} · dry-run\n"
             f"Incident {action['case_id']} · run {action['run_id']}\n"
             f"Source: {action['target']} · Verdict: {action['original_judge_verdict']}\n"
@@ -207,8 +210,8 @@ def query_text(result):
             f"Gaps: {'; '.join(action['evidence_gaps'])}\n"
             f"Justification: {action['justification']}\n"
             f"Expires (Unix): {action['expires']} · duration {action['ttl']} seconds\n"
-            f"/confirm {action['id']} approve\n/confirm {action['id']} reject"
-        )[:3500]
+        )
+        return details[: 3500 - len(suffix)].rstrip() + suffix
     if "status" in result:
         # Final decision is delivered exclusively by the response.completed event workflow.
         return "Decision request recorded. Reference: " + str(result["update_id"])
@@ -246,11 +249,16 @@ def query_reply(result):
     body = {"chat_id": result["chat_id"], "text": query_text(result)}
     action = result.get("copilot_action")
     if action and action["status"] == "prepared" and re.fullmatch(r"[a-f0-9]{32}", action["id"]):
+        decision = result.get("confirmation_decision")
+        if decision not in {None, "approve", "reject"}:
+            return body
+        controls = (("approve", "Approve", "a"), ("reject", "Reject", "i"))
         body["reply_markup"] = {
             "inline_keyboard": [
                 [
-                    {"text": "Approve", "callback_data": "ac:a:" + action["id"]},
-                    {"text": "Reject", "callback_data": "ac:i:" + action["id"]},
+                    {"text": label, "callback_data": f"ac:{code}:" + action["id"]}
+                    for choice, label, code in controls
+                    if decision is None or choice == decision
                 ]
             ]
         }

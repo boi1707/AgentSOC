@@ -21,6 +21,8 @@ V5_TABLES = {
     "assistant_channel_links",
     "assistant_link_tokens",
     "assistant_action_intents",
+    "assistant_drafts",
+    "assistant_channel_intents",
 }
 
 
