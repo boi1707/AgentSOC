@@ -26,17 +26,17 @@ Shuffle secrets, never workflow URLs, source control, logs, or Telegram messages
    `https://<private-agentsoc>/api/v1/integrations/telegram`. Verify TLS; use WireGuard/private ingress
    and restrict this endpoint to Shuffle. Sign `timestamp + '.' + raw_body` with HMAC SHA-256.
    AgentSOC permits five minutes of clock skew. Keep both systems synchronized.
-5. Route the JSON reply through `query_text`; send plain text only to its returned `chat_id`.
-   Use the current helper: conversational replies prioritize the shared labelled fallback
+5. Route the JSON reply through `query_reply` and forward the returned object as JSON to Telegram
+   `sendMessage`, preserving nested `reply_markup` when present. Conversational replies prioritize the shared labelled fallback
    or validated interpretation and include citation references, never normalized evidence JSON.
    See [focused assistant fallback](../../docs/ASSISTANT_FOCUSED_FALLBACK.md). Updating source does
    not automatically update the Python step of your deployed Shuffle workflow.
    Do not set Telegram `parse_mode`. Use the bot token in the Telegram app's secret credential field.
    Do not forward raw HTTP errors, server configuration, or full API JSON directly into a group chat.
-6. Use `/status`, `/incidents` (last 24 hours), `/dangerous`, `/pending`, `/review 24h`, `/incident <id>`, `/why <id>`,
-   `/approve <incident_id> <proposal_id>`, `/ignore <incident_id> <proposal_id>` (`/reject` is an alias).
-   Query results include the exact proposal ID needed for a decision. Inline Approve/Ignore buttons
-   reference the current analysis-run ID; arbitrary natural-language decision parsing is absent.
+6. Use a private bot chat for investigation commands and persistent Copilot threads. Select a Copilot
+   intent with `/select <intent_id>` before saying Approve or Reject to request its confirmation.
+   Group chats retain status, help, and the legacy commands or signed buttons for a referenced
+   standard proposal. See the [chat capabilities and acceptance checks](WORKFLOWS.md#copilot-staging-acceptance).
 
 The callback receipt uses Telegram's original `update_id`. Retrying the same body returns the stored
 result without dispatching again; changing a reserved update ID returns 409. Re-sign the same body

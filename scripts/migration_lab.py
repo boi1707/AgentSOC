@@ -15,6 +15,15 @@ BASELINE = "0022d28"
 V2_TABLES = {"callback_receipts", "notification_outbox"}
 V3_TABLES = {"managed_block_leases"}
 V4_TABLES = {"vt_hash_jobs", "vt_hash_cache"}
+V5_TABLES = {
+    "assistant_threads",
+    "assistant_messages",
+    "assistant_channel_links",
+    "assistant_link_tokens",
+    "assistant_action_intents",
+    "assistant_drafts",
+    "assistant_channel_intents",
+}
 
 
 def snapshot(path):

@@ -16,6 +16,7 @@ from scripts.migration_lab import (
     V2_TABLES,
     V3_TABLES,
     V4_TABLES,
+    V5_TABLES,
     assert_relationships,
     seed_v1,
     snapshot,
@@ -38,11 +39,12 @@ def test_v1_migration_preserves_every_record_twice_and_relationships(tmp_path):
     assert V2_TABLES.isdisjoint(before)
     Store(path)
     first = snapshot(path)
-    assert set(first) == set(before) | V2_TABLES | V3_TABLES | V4_TABLES
+    assert set(first) == set(before) | V2_TABLES | V3_TABLES | V4_TABLES | V5_TABLES
+    assert all(first[table] == [] for table in V5_TABLES)
     assert first["managed_block_leases"] == []
     for table, rows in before.items():
         if table == "schema_migrations":
-            assert rows[0] in first[table] and {r[0] for r in first[table]} == {1, 2, 3, 4}
+            assert rows[0] in first[table] and {r[0] for r in first[table]} == {1, 2, 3, 4, 5}
         else:
             assert first[table] == rows, table
     Store(path)
@@ -91,9 +93,9 @@ def test_existing_v2_records_are_preserved_and_v3_failure_rolls_back(tmp_path):
 
     Store(path)
     migrated = snapshot(path)
-    assert set(migrated) - set(before) == V3_TABLES | V4_TABLES
+    assert set(migrated) - set(before) == V3_TABLES | V4_TABLES | V5_TABLES
     assert migrated["managed_block_leases"] == []
-    assert {row[0] for row in migrated["schema_migrations"]} == {1, 2, 3, 4}
+    assert {row[0] for row in migrated["schema_migrations"]} == {1, 2, 3, 4, 5}
     assert set(before["schema_migrations"]).issubset(migrated["schema_migrations"])
     for table in set(before) - {"schema_migrations"}:
         assert migrated[table] == before[table], table

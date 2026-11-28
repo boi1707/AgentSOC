@@ -798,7 +798,7 @@ assert old.store.get_run(replay)["evidence"] == snapshot
 with old.store.connect() as conn:
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert conn.execute("SELECT count(*) FROM actions").fetchone()[0] == 0
-    assert max(r[0] for r in conn.execute("SELECT version FROM schema_migrations")) == 4
+    assert max(r[0] for r in conn.execute("SELECT version FROM schema_migrations")) == 5
     recorded = conn.execute("SELECT evidence FROM ledger WHERE run_id=? AND agent IN ('host','judge')", (replay,)).fetchall()
     assert len(recorded) == 2
     for row in recorded:

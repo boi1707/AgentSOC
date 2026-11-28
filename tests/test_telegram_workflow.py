@@ -221,7 +221,7 @@ def test_proactive_two_chat_inline_buttons_and_signed_approval_round_trip(flow):
     # Telegram reads the same authoritative proposal/result as Web.
     read = {
         "update_id": 2,
-        "message": {"from": {"id": 123}, "chat": {"id": 111}, "text": "/incident " + case["id"]},
+        "message": {"from": {"id": 123}, "chat": {"id": 123}, "text": "/incident " + case["id"]},
     }
     assert callback(flow, read).json()["facts"][0]["proposal"]["status"] == "dry_run"
 

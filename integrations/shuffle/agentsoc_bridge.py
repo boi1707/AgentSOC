@@ -39,7 +39,7 @@ def callback_request(update, secret, *, language="en", now=None):
     if sender.get("is_bot"):
         raise ValueError("Only human commands are supported")
     if button:
-        if not re.fullmatch(r"as:[ai]:[a-f0-9]{32}", str(button.get("data", ""))):
+        if not re.fullmatch(r"(?:as|ac):[ai]:[a-f0-9]{32}", str(button.get("data", ""))):
             raise ValueError("Invalid proposal button")
         command = "/callback"
     elif isinstance(message.get("text"), str):
@@ -193,6 +193,25 @@ class DeliveryLedger:
 def query_text(result):
     if "error" in result:
         return str(result["error"]["message"])[:3500]
+    if "copilot_text" in result:
+        return result["copilot_text"][:3500]
+    if "copilot_action" in result:
+        action = result["copilot_action"]
+        if action["status"] != "prepared":
+            return f"Intent {action['id']}: {action['status']}; dry-run; blocked=false"
+        decision = result.get("confirmation_decision")
+        commands = [decision] if decision in {"approve", "reject"} else ["approve", "reject"]
+        suffix = "\n" + "\n".join(f"/confirm {action['id']} {choice}" for choice in commands)
+        details = (
+            f"Intent {action['id']} · {action['approval_policy']} · dry-run\n"
+            f"Incident {action['case_id']} · run {action['run_id']}\n"
+            f"Source: {action['target']} · Verdict: {action['original_judge_verdict']}\n"
+            f"Evidence: {', '.join(action['evidence_ids'])}\n"
+            f"Gaps: {'; '.join(action['evidence_gaps'])}\n"
+            f"Justification: {action['justification']}\n"
+            f"Expires (Unix): {action['expires']} · duration {action['ttl']} seconds\n"
+        )
+        return details[: 3500 - len(suffix)].rstrip() + suffix
     if "status" in result:
         # Final decision is delivered exclusively by the response.completed event workflow.
         return "Decision request recorded. Reference: " + str(result["update_id"])
@@ -221,4 +240,26 @@ def query_text(result):
         )
     for citation in result.get("citations", [])[:5]:
         lines.append(f"Evidence [{citation['source']}:{citation['id']}]")
+    for item in result.get("related", [])[:5]:
+        lines.append(f"Historical investigation {item['incident_id']} / {item['run_id']}")
     return "\n".join(lines)[:3500]
+
+
+def query_reply(result):
+    body = {"chat_id": result["chat_id"], "text": query_text(result)}
+    action = result.get("copilot_action")
+    if action and action["status"] == "prepared" and re.fullmatch(r"[a-f0-9]{32}", action["id"]):
+        decision = result.get("confirmation_decision")
+        if decision not in {None, "approve", "reject"}:
+            return body
+        controls = (("approve", "Approve", "a"), ("reject", "Reject", "i"))
+        body["reply_markup"] = {
+            "inline_keyboard": [
+                [
+                    {"text": label, "callback_data": f"ac:{code}:" + action["id"]}
+                    for choice, label, code in controls
+                    if decision is None or choice == decision
+                ]
+            ]
+        }
+    return body
