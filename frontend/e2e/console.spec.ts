@@ -89,6 +89,11 @@ test("empty state, Wazuh pipeline, ledger, analyst note and dry-run review", asy
     await expect(
       page.getByRole("heading", { name: heading, exact: true }),
     ).toBeVisible();
+    if (link === "System health") {
+      await expect(
+        page.getByText("Unavailable · read-only diagnostics", { exact: true }),
+      ).toBeVisible();
+    }
   }
   await expect(
     page.getByText("response.approve", { exact: true }).first(),

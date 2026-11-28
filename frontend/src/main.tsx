@@ -1937,6 +1937,12 @@ function SystemPage() {
                   <dd>
                     <Badge value={d.response_mode} />
                   </dd>
+                  {d.pfsense_enforcement?.live_available === false && (
+                    <>
+                      <dt>{t("pfSense live enforcement")}</dt>
+                      <dd>{t("Unavailable · read-only diagnostics")}</dd>
+                    </>
+                  )}
                   <dt>{t("Demo isolation")}</dt>
                   <dd>
                     {d.demo

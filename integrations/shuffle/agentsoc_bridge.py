@@ -217,7 +217,14 @@ def query_text(result):
         return "Decision request recorded. Reference: " + str(result["update_id"])
     if "system" in result:
         state = result["system"]
-        return f"AgentSOC: {state['response_mode']}\nWorker fresh: {state['worker_fresh']}\nBacklog: {state['backlog']}"
+        text = f"AgentSOC: {state['response_mode']}\nWorker fresh: {state['worker_fresh']}\nBacklog: {state['backlog']}"
+        if state.get("pfsense_enforcement", {}).get("live_available") is False:
+            text += (
+                "\nKhông thể chặn trực tiếp qua pfSense."
+                if result.get("language") == "vi"
+                else "\nLive pfSense enforcement unavailable."
+            )
+        return text
     # Use the same server-authored conclusion shown by Web; never dump evidence JSON.
     lines = []
     fallback = result.get("fallback")

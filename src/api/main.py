@@ -18,6 +18,7 @@ from src.api.v1 import health_snapshot, scrub
 from src.api.v1 import router as v1_router
 from src.incident import Grouper, norm
 from src.logs import configure_logging
+from src.response_adapters import pfsense_enforcement_status
 from src.service import Service
 from src.settings import Settings
 
@@ -204,6 +205,7 @@ def create_app(settings=None, *, worker=None, managed_transport=None, managed_cl
             "status": "ok",
             "llm_mode": config.llm_mode,
             "response_mode": config.response_mode,
+            "pfsense_enforcement": pfsense_enforcement_status(),
             "llm_configured": bool(config.llm_url and config.llm_key and config.llm_model),
             "case_count": count,
             "pending_incidents": queued + len(group.inc),

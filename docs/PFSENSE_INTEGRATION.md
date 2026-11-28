@@ -50,7 +50,7 @@ generator and endpoint/model sources. The lab instance's generated schema was no
 | `GET /api/v2/firewall/aliases?name=AGENTSOC_BLOCKLIST` | The success envelope has integer `code` and a `data` list. Accept exactly one matching host alias with numeric `id` and an `address` array. Its positional object ID is diagnostic only. |
 | `GET /api/v2/firewall/apply` | `data.applied` and `data.pending_subsystems` describe global pending firewall changes. This is a separate observation from alias configuration and PF table membership. |
 | `GET /api/v2/diagnostics/table?id=AGENTSOC_BLOCKLIST` | `data.id` and `data.name` identify the PF table and `data.entries` contains runtime entries. The adapter recognizes exact IP and enclosing CIDR entries. Runtime membership alone cannot establish whether traffic was denied. |
-| Alias write and firewall apply | Reviewed but disabled. The single-alias PATCH identifies the object by its numeric configuration position. The alias's ordered `address` and `detail` arrays are writable. `apply` and `async` are boolean control parameters. Alias apply and `POST /api/v2/firewall/apply` both dispatch a global filter reload. |
+| Alias write and firewall apply | The single-alias PATCH identifies the object by its numeric configuration position. The alias's ordered `address` and `detail` arrays are writable. PATCH passes the `append` and `remove` controls to the model, which prepares the array changes before the configuration write. Those controls provide neither an expected revision nor per-entry ownership. Alias apply and `POST /api/v2/firewall/apply` both dispatch a global filter reload. AgentSOC keeps these writes disabled. |
 
 Sources: [alias model](https://github.com/pfrest/pfSense-pkg-RESTAPI/blob/9024718c0dc2df7b21ffe9816612b49cd8888cd9/pfSense-pkg-RESTAPI/files/usr/local/pkg/RESTAPI/Models/FirewallAlias.inc),
 [apply model](https://github.com/pfrest/pfSense-pkg-RESTAPI/blob/9024718c0dc2df7b21ffe9816612b49cd8888cd9/pfSense-pkg-RESTAPI/files/usr/local/pkg/RESTAPI/Models/FirewallApply.inc),
@@ -89,6 +89,44 @@ the [positional update](https://github.com/pfrest/pfSense-pkg-RESTAPI/blob/90247
 the [package write lock](https://github.com/pfrest/pfSense-pkg-RESTAPI/blob/9024718c0dc2df7b21ffe9816612b49cd8888cd9/pfSense-pkg-RESTAPI/files/usr/local/pkg/RESTAPI/Core/Model.inc#L754),
 the [global dispatcher](https://github.com/pfrest/pfSense-pkg-RESTAPI/blob/9024718c0dc2df7b21ffe9816612b49cd8888cd9/pfSense-pkg-RESTAPI/files/usr/local/pkg/RESTAPI/Dispatchers/FirewallApplyDispatcher.inc#L16),
 and [PF table inspection and flush](https://github.com/pfrest/pfSense-pkg-RESTAPI/blob/9024718c0dc2df7b21ffe9816612b49cd8888cd9/pfSense-pkg-RESTAPI/files/usr/local/pkg/RESTAPI/Models/Table.inc#L48-L67).
+
+### Copilot live-response gate
+
+The Copilot relies on the same control plane as the existing worker. Standard and manual analyst
+confirmations currently produce dry-run records. The managed worker lifecycle in this repository is
+exercised with injected deterministic transports. API startup and worker startup reject both
+`RESPONSE_MODE=pfsense` and `PFSENSE_LIVE_ENABLED=1` before constructing the service. The
+`/health` and authenticated `/api/v1/system` responses expose
+`pfsense_enforcement: { "live_available": false, "reason": "no_verified_write_transport" }`.
+System health in Web and signed Telegram `/status` report the same limitation. These status
+checks do not contact the firewall.
+
+Keep `LLM_MODE=live`, `RESPONSE_MODE=dry-run` and `PFSENSE_LIVE_ENABLED=0` in production.
+For diagnostics, retain the dedicated credential with only the three GET privileges above,
+managed alias identity, verified TLS hostname and CA, and existing protected network/lab scope.
+The current build requires no firewall writer privileges and no database migration for this gate.
+
+An authorized lab operator can establish the next gate by recording the installed pfSense and
+pfREST versions, package revision and a sanitized installed OpenAPI schema. A release label or
+an OpenAPI write method alone cannot prove ownership or concurrency behavior. Before enabling
+automation, require evidence of all of the following on the exact lab build:
+
+1. Stable identity and server-side write authorization limited to the dedicated rule/table and
+   approved lab source, with a revision check or independently enforced exclusive authority.
+2. Coherent ownership and apply semantics that preserve unrelated pending changes and manually
+   managed entries, including when another writer or an ambiguous timeout is simulated.
+3. Separate authorization for the isolated lab, verified backup of the firewall configuration
+   and SQLite, a confirmed rollback image and a staffed cleanup window.
+4. Once a writer has passed independent review, paired observations of the approved source's
+   baseline connectivity, denied fresh traffic and relevant rule logs during the lease, and
+   restored connectivity after verified owned-only cleanup. Include a restart, a duplicate
+   confirmation and an externally owned entry that survives expiry.
+5. Emergency stop that halts new admission while retaining the ownership journal and ability
+   to reconcile and clean up owned leases. Verify remaining active leases before revoking
+   credentials or rolling back. The current build creates no firewall lease to clean up.
+
+An operator review of those prerequisites is still required. The upstream source review and
+CI simulations provide no evidence of live enforcement on the installed lab.
 
 The existing block rule, interface, destination and logging configuration remain operator-owned.
 Existing PF connections may remain established through a ruleset reload. The reviewed state

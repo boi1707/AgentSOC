@@ -4,9 +4,14 @@ from dataclasses import replace
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
+from integrations.shuffle.agentsoc_bridge import query_text
+from src import worker
+from src.api.main import create_app
 from src.response_adapters import BlockPlan, PfSenseAdapter, PfSenseObservation, PfSenseReadError
 from src.settings import Settings
+from tests.test_assistant_control import command, signed, telegram_settings
 
 ALIAS = "AGENTSOC_BLOCKLIST"
 TARGET = "10.100.27.10"
@@ -193,3 +198,41 @@ def test_mutation_is_disabled_even_if_requested(settings):
     for options in ({"response_mode": "pfsense"}, {"pfsense_live_enabled": True}):
         with pytest.raises(ValueError, match="mutation is unavailable"):
             replace(settings, **options).validate()
+
+
+@pytest.mark.parametrize("options", [{"response_mode": "pfsense"}, {"pfsense_live_enabled": True}])
+def test_backend_and_worker_reject_live_before_service_initialization(settings, monkeypatch, options):
+    config = replace(settings, **options)
+
+    def unexpected_initialization(*args, **kwargs):
+        pytest.fail("Live configuration reached service initialization")
+
+    monkeypatch.setattr("src.api.main.Service", unexpected_initialization)
+    monkeypatch.setattr(worker, "Service", unexpected_initialization)
+    monkeypatch.setattr(worker.Settings, "from_env", lambda: config)
+    with pytest.raises(ValueError, match="no_verified_write_transport"):
+        worker.main()
+    with pytest.raises(ValueError, match="no_verified_write_transport"), TestClient(create_app(config)):
+        pass
+
+
+def test_status_separates_dry_run_from_pfrest_diagnostics(console, settings, monkeypatch):
+    telegram_settings(settings)
+
+    def unexpected_probe(*args):
+        pytest.fail("Status must never contact the firewall")
+
+    monkeypatch.setattr(PfSenseAdapter, "observe", unexpected_probe)
+    expected = {"live_available": False, "reason": "no_verified_write_transport"}
+    for path in ("/health", "/api/v1/system"):
+        status = console.get(path).json()
+        assert status["response_mode"] == "dry-run" and status["pfsense_enforcement"] == expected
+    for language, message in (
+        ("en", "Live pfSense enforcement unavailable."),
+        ("vi", "Không thể chặn trực tiếp qua pfSense."),
+    ):
+        reply = signed(
+            console, settings, {**command("/status", update=language), "language": language}
+        ).json()
+        assert reply["system"]["pfsense_enforcement"] == expected
+        assert message in query_text(reply)

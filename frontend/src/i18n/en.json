@@ -193,6 +193,8 @@
   "Replay uses a frozen snapshot and cannot execute a response. Model output may differ.": "Replay uses a frozen snapshot and cannot execute a response. Model output may differ.",
   "Response history": "Response history",
   "Response mode": "Response mode",
+  "pfSense live enforcement": "pfSense live enforcement",
+  "Unavailable · read-only diagnostics": "Unavailable · read-only diagnostics",
   "Response review": "Response review",
   "Result": "Result",
   "Return to overview": "Return to overview",

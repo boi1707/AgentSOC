@@ -217,6 +217,7 @@ export interface Metrics {
   last_alert_at: number | null;
 }
 export interface Health {
+  pfsense_enforcement?: { live_available: boolean; reason: string };
   integrations?: Record<
     string,
     {

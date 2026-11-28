@@ -18,6 +18,7 @@ from src.api.schemas import (
     Page,
 )
 from src.integrations import incident_integrations, integration_health
+from src.response_adapters import pfsense_enforcement_status
 
 router = APIRouter(prefix="/api/v1")
 
@@ -560,6 +561,7 @@ def health_snapshot(repo, config):
         },
         "demo": config.demo,
         "response_mode": config.response_mode,
+        "pfsense_enforcement": pfsense_enforcement_status(),
     }
 
 
